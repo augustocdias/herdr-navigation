@@ -1,0 +1,12 @@
+{
+  "global": {
+    "alt-w": "mod.open:picker-enriched"
+  },
+  "mod:picker-enriched": {
+    "ctrl-1": "terminal",
+    "ctrl-2": "terminal",
+    "ctrl-3": "terminal",
+    "ctrl-4": "terminal",
+    "ctrl-5": "terminal"
+  }
+}

@@ -44,7 +44,9 @@ imports = [inputs.herdr-navigation.homeManagerModules.default];
 
 The module installs only the two mods. It does not replace your keys, settings, layouts, or runtime state.
 
-In your existing Nix-managed key configuration, map `alt-w` to `mod.open:picker-enriched`. In your chosen layout, replace the tabs block's mod identifier `tabs` with `tabs-enriched`. Keep both changes declarative and rebuild your system or Home Manager configuration to apply them.
+Merge `inputs.herdr-navigation.lib.keys` into your existing Nix-managed key object with `lib.recursiveUpdate`. The fragment opens the picker with Alt+W and suppresses Herdr's default Ctrl+1–5 navigation only inside the picker, allowing those keys to reach its state filters. Preserve the rest of your key configuration.
+
+In your chosen layout, replace the tabs block's mod identifier `tabs` with `tabs-enriched`. Keep both changes declarative and rebuild your system or Home Manager configuration to apply them.
 
 The optional `navigation/layouts/navigation.json` provides a complete layout based on Herdr's main layout. To install it through Home Manager:
 

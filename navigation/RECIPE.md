@@ -18,7 +18,7 @@ Prefer a live optional integration title, then the native agent report title, th
 
 ## Agent Picker
 
-Bind Alt+W to `mod.open:picker-enriched`. Show the same tab labels and allow text search across the full, untruncated label.
+Merge the repository's `keys.json` fragment into the existing key configuration. It binds Alt+W to `mod.open:picker-enriched` and disables the global Ctrl+1–5 actions inside that mod so its own filter handler receives them. Show the same tab labels and allow text search across the full, untruncated label.
 
 Provide clickable All, Working, Needs you, Done, and Idle chips. Ctrl+1 through Ctrl+5 select them while the search input remains focused. Reset row selection and scroll position after a filter change. Combine state and text predicates. Match any agent in a tab rather than only its aggregate state; shell-only tabs do not match agent-state filters.
 

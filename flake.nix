@@ -3,5 +3,6 @@
 
   outputs = _: {
     homeManagerModules.default = import ./home-manager.nix;
+    lib.keys = builtins.fromJSON (builtins.readFile ./keys.json);
   };
 }
