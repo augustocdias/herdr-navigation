@@ -4,7 +4,7 @@ Build a Herdr workspace layout with a familiar sidebar, a tab bar that describes
 
 ## Layout
 
-Use Herdr's main layout structure: spaces and agents in a sidebar, tabs above the work area, and the existing Files and Changes panels. Keep the standard window controls and terminal panes. Replace the tab-bar mod with `tabs-enriched`; keep the other shipped mods.
+Use Herdr's main layout structure: spaces and agents in a sidebar, tabs above the work area, and the existing Files and Changes panels. Keep the standard window controls and terminal panes. Replace the tab-bar mod with `tabs-enriched` and the spaces sidebar with `spaces-enriched`; keep the other shipped mods.
 
 The supplied layout is optional. Both mods can be used in an existing layout without adopting this arrangement.
 
@@ -24,8 +24,14 @@ Provide clickable All, Working, Needs you, Done, and Idle chips. Ctrl+1 through 
 
 Preserve arrow-key navigation, Enter, Escape, Ctrl+D to close a tab, and new-tab/new-space actions. Show an explicit empty-result message when a state filter and search have no matches. Follow Herdr's native attention semantics, including Done becoming Idle when viewed.
 
+## Space Shortcuts
+
+Add Open workspace and New worktree buttons before the local `+` in the spaces sidebar: on the This computer row when another machine is known, else in the Spaces header. Hide them in the narrow rail. Both act on this computer only.
+
+Open workspace takes a folder from the system picker, selects a local space made in that folder, or opens one named after the folder (`repo/branch` for a main checkout kept as `<repo>/<branch>`). New worktree asks for a branch of the active space's repository, reuses its worktree or checks it out at `<repo folder>/<branch>` from the existing branch or HEAD, and names the space after the branch. Ask before running `direnv allow` on the folder's own `.envrc`, with Allow & open, Open only, and Cancel.
+
 ## Appearance and installation
 
-Use the active Herdr theme for all added controls. Keep both mods self-contained so they work through Home Manager file symlinks. The repository's Home Manager module installs only the mods; declare keys and layout selection separately in Nix and rebuild before treating the change as installed.
+Use the active Herdr theme for all added controls. Keep each mod self-contained so they work through Home Manager file symlinks. The repository's Home Manager module installs only the mods; declare keys and layout selection separately in Nix and rebuild before treating the change as installed.
 
 The preview comes from an isolated App/Core session with synthetic status reports. Preserve the Apache-2.0 attribution when distributing derived code.

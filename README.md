@@ -1,6 +1,6 @@
 # Herdr Navigation
 
-Two mods for Herdr App: Smart Tabs and Agent Picker. They use the App's mod API and require no Rust patches or changes to herdr-core.
+Mods for Herdr App: Smart Tabs, Agent Picker, and Space Shortcuts. They use the App's mod API and require no Rust patches or changes to herdr-core.
 
 ![Smart Tabs and Agent Picker](navigation/preview.png)
 
@@ -34,6 +34,16 @@ The filter chips are clickable. A tab matches if any of its agents has the selec
 
 Arrow keys select a row, Enter opens it, Escape closes the picker, and Ctrl+D closes the selected tab. New-tab and new-space actions remain available, including when no agent matches.
 
+## Space Shortcuts
+
+`spaces-enriched` is Herdr's spaces sidebar with two buttons before the local `+`. When another machine is known, the buttons sit on the This computer row; otherwise they sit in the Spaces header. The narrow sidebar rail hides them. They work only on this computer.
+
+Open workspace asks for a folder in the system folder picker. If a local space was made in that folder, Herdr selects it. Otherwise it opens a new space named after the folder. A main checkout kept as `<repo>/<branch>` is named `repo/branch`.
+
+New worktree asks for a branch of the repository where the active space's first terminal is. A worktree that already has the branch is reused. An existing branch is checked out unchanged, and a new branch starts from HEAD. New checkouts go to `<repo folder>/<branch>`, next to the main checkout. The space is named after the branch, and an existing space in that checkout is renamed to it.
+
+Before opening a folder whose own `.envrc` direnv has not allowed, the `space-open` dialog asks first. Allow & open runs `direnv allow`, Open only opens the space without it, and Cancel opens nothing. Without direnv installed, the dialog skips this step.
+
 ## Install with Nix
 
 Add this repository as a flake input named `herdr-navigation`, then import its Home Manager module:
@@ -42,11 +52,11 @@ Add this repository as a flake input named `herdr-navigation`, then import its H
 imports = [inputs.herdr-navigation.homeManagerModules.default];
 ```
 
-The module installs only the two mods. It does not replace your keys, settings, layouts, or runtime state.
+The module installs only the mods. It does not replace your keys, settings, layouts, or runtime state.
 
 Merge `inputs.herdr-navigation.lib.keys` into your existing Nix-managed key object with `lib.recursiveUpdate`. The fragment opens the picker with Alt+W and suppresses Herdr's default Ctrl+1–5 navigation only inside the picker, allowing those keys to reach its state filters. Preserve the rest of your key configuration.
 
-In your chosen layout, replace the tabs block's mod identifier `tabs` with `tabs-enriched`. Keep both changes declarative and rebuild your system or Home Manager configuration to apply them.
+In your chosen layout, replace the tabs block's mod identifier `tabs` with `tabs-enriched`, and the spaces block's `spaces` with `spaces-enriched`. Keep both changes declarative and rebuild your system or Home Manager configuration to apply them.
 
 The optional `navigation/layouts/navigation.json` provides a complete layout based on Herdr's main layout. To install it through Home Manager:
 
@@ -61,7 +71,7 @@ Select the Navigation layout after activation if you installed it. Each mod ship
 
 Development checks used Herdr App 0.1.11 and Core 0.1.16 on Linux in a private display and Core session. The mod loader checks and live picker interactions ran through Nix-store file symlinks. No Windows or macOS runtime checks have been performed.
 
-The preview uses synthetic agent reports, not private sessions. Before updating the mods, exercise both `herdr-app check` commands and the visible App behavior in an isolated session. Keep the title helper in both self-contained modules consistent.
+The preview uses synthetic agent reports, not private sessions. `node --test` checks the Space Shortcuts naming, worktree lookup, and direnv rules. Before updating the mods, run `herdr-app check` on each mod folder and exercise the visible App behavior in an isolated session. Keep the title helper in both self-contained modules consistent.
 
 Herdr's community catalog discovers public GitHub repositories with the `herdr-layout` topic. The `navigation/` folder contains the layout, mods, recipe, and preview required by the catalog. Publishing the repository and setting the topic are separate from installing it locally.
 

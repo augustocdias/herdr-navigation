@@ -1,7 +1,7 @@
-Herdr Navigation includes modified Herdr App tab-bar and picker code and a derived layout.
+Herdr Navigation includes modified Herdr App tab-bar, picker, and spaces-sidebar code and a derived layout.
 Upstream: https://github.com/herdrdev/herdr-app
 Source version: Herdr App 0.1.11
-Original files: defaults/mods/tabs/main.js, defaults/mods/picker/main.js, their mod.json manifests, and defaults/layouts/main.json.
+Original files: defaults/mods/tabs/main.js, defaults/mods/picker/main.js, defaults/mods/spaces/main.js, their mod.json manifests, and defaults/layouts/main.json.
 
-Modifications add multi-pane titles, title truncation, optional session metadata, and agent-state filtering.
+Modifications add multi-pane titles, title truncation, optional session metadata, agent-state filtering, and workspace and worktree shortcuts.
 Distributed under the Apache License, Version 2.0. See LICENSE.
