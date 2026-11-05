@@ -8,7 +8,7 @@ Mods for Herdr App: Smart Tabs, Agent Picker, and Space Shortcuts. They use the 
 
 Each terminal pane contributes its program name. Agent panes also show their session title when available. Multiple panes are joined with ` | ` in pane order. Labels are capped at 80 Unicode code points, including the ellipsis, and at 480 pixels; the tooltip contains the full title.
 
-Descriptive saved tab names take precedence. Herdr stores `shell` and launch-program names as named tabs, so those names are treated as automatic. A manual name equal to a current program name has the same treatment. Clear a saved name to return to automatic titles. Display updates do not rename tabs or write layout state.
+Descriptive saved tab names take precedence. Herdr stores `shell` and launch-program names as named tabs, so those names are treated as automatic. A manual name equal to a current program name has the same treatment. Clear a saved name to return to automatic titles. Display updates do not rename tabs or write layout state; only [pinned tabs](#pinned-tabs) open and move tabs.
 
 Agent title sources, in priority order:
 
@@ -17,6 +17,44 @@ Agent title sources, in priority order:
 3. The terminal title set by the program.
 
 No integration label is required. If an agent reports no title, the tab shows its program name. Mod panes show their mod identifier.
+
+## Pinned tabs
+
+Another mod can provide a tab type: a mod that shows its own view in a tab pane. A pinned tab opens that tab type in every space automatically. With nothing configured, Smart Tabs behaves as before.
+
+Declare pinned tabs with the Home Manager module:
+
+```nix
+programs.herdr-navigation.pinnedTabs = [
+  { label = "Board"; mod = "my-board"; }
+];
+```
+
+The module writes the list to `mods/tabs-enriched/pinned.json` as `[{ "label": "Board", "mod": "my-board" }]`. Without Home Manager, write that file yourself. An entry has only a tab name and a mod. Smart Tabs passes no props, so the provider owns its settings.
+
+When a space is shown without one of its pinned tabs, Smart Tabs runs `tab.new { space, name: label, mod }`, then selects the tab you were on again. Pinned tabs stay first, in configured order, and they are real tabs: Ctrl+number, the picker, and tab state work as they do for any tab. Each pinned tab has an accent marker and no close button, and a divider separates it from ordinary tabs. Smart Tabs does not change other tabs, their names, or any layout.
+
+Gotchas:
+
+- Smart Tabs finds a pinned tab by its name and its mod pane. Renaming a pinned tab turns it into an ordinary tab, and a new pinned tab opens. Double-click rename is off for pinned tabs.
+- Closing a pinned tab from its menu reopens it. Remove the entry from configuration to unpin it.
+- If a pinned tab cannot open, for example because its mod is not installed, Herdr logs the error and Smart Tabs tries that space again only after the mod reloads.
+- Pinned tabs open in a space when it is first shown. While a space still has a pinned tab, closing its last ordinary tab does not close the space; close the space from the sidebar.
+
+### Provider contract
+
+A provider is an ordinary mod, for example `mods/my-board/main.js` with `{ "place": "none" }` in `mod.json`. It renders its view in the tab's pane and reads its own state from `shared`, `localStorage`, or files. Every space has its own copy, so keep data that must be identical across spaces in `shared` state. Only the copy in the shown tab receives `<mod>.<command>` key commands.
+
+A provider adds buttons to the top-right of the tab bar, before Files and Changes, by publishing a list under the shared key `tab-controls:<mod>`:
+
+```js
+setShared("tab-controls:my-board", [
+  { id: "cron", label: "Cron", icon: "mods/my-board/clock.svg", command: "my-board.cron" },
+  { id: "chat", label: "Chat", command: "my-board.chat", active: true },
+]);
+```
+
+Smart Tabs shows these controls while the shown tab contains a pane of that mod, whether the tab is pinned or not. A click runs `run(command, args ?? {})`, so `my-board.cron` reaches the shown copy's `nextCommand()` as `cron`. `label` and `command` are required; an entry without them is skipped. `icon` is an optional tinted SVG path, and `active: true` draws the selected style. Publish the list again to change it, for example when a control's `active` state changes.
 
 ## Agent Picker
 
@@ -71,7 +109,7 @@ Select the Navigation layout after activation if you installed it. Each mod ship
 
 Development checks used Herdr App 0.1.11 and Core 0.1.16 on Linux in a private display and Core session. The mod loader checks and live picker interactions ran through Nix-store file symlinks. No Windows or macOS runtime checks have been performed.
 
-The preview uses synthetic agent reports, not private sessions. `node --test` checks the Space Shortcuts naming, worktree lookup, and direnv rules. Before updating the mods, run `herdr-app check` on each mod folder and exercise the visible App behavior in an isolated session. Keep the title helper in both self-contained modules consistent.
+The preview uses synthetic agent reports, not private sessions. `node --test` checks the Space Shortcuts naming, worktree lookup, and direnv rules, and how Smart Tabs reads pinned tabs and decides which to open or move. Before updating the mods, run `herdr-app check` on each mod folder and exercise the visible App behavior in an isolated session. Keep the title helper in both self-contained modules consistent.
 
 Herdr's community catalog discovers public GitHub repositories with the `herdr-layout` topic. The `navigation/` folder contains the layout, mods, recipe, and preview required by the catalog. Publishing the repository and setting the topic are separate from installing it locally.
 
