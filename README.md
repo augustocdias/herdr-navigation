@@ -32,18 +32,29 @@ programs.herdr-navigation.pinnedTabs = [
 
 The module writes the list to `mods/tabs-enriched/pinned.json` as `[{ "label": "Board", "mod": "my-board" }]`. Without Home Manager, write that file yourself. An entry has only a tab name and a mod. Smart Tabs passes no props, so the provider owns its settings.
 
-When a space is shown without one of its pinned tabs, Smart Tabs runs `tab.new { space, name: label, mod }`, then selects the tab you were on again. Pinned tabs stay first, in configured order, and they are real tabs: Ctrl+number, the picker, and tab state work as they do for any tab. Each pinned tab has an accent marker and no close button, and a divider separates it from ordinary tabs. Smart Tabs does not change other tabs, their names, or any layout.
+When a space is shown without one of its pinned tabs, Smart Tabs runs `tab.new { space, name: label, mod }`, then selects the tab you were on again. Pinned tabs stay first, in configured order, and they are real tabs: Ctrl+number, the picker, and tab state work as they do for any tab. A pinned tab shows only an icon, with its name in the tooltip, and has no close button. A divider separates pinned tabs from ordinary tabs. Smart Tabs does not change other tabs, their names, or any layout.
+
+Herdr gives mod panes no program icon, so the icon is the provider's own `mods/<mod>/icon.svg`, drawn tinted. Without that file, Smart Tabs draws Herdr's pin glyph.
+
+### Pin and Unpin
+
+Right-click a tab for Smart Tabs' tab menu: Herdr's Rename, New tab and Close, plus pinning. A pinned tab's menu has New tab and Unpin, but no Close or Rename. An ordinary tab holding a mod pane has Pin. Terminal tabs cannot be pinned.
+
+- Pin applies in every space, like a configured entry. Its label is the tab's name. An unnamed tab is first renamed after its mod, because its number changes as tabs move.
+- Unpin applies in every space. Each copy stays open as an ordinary tab that you can close, and new spaces no longer get one.
+
+`pinned.json` is read-only under Home Manager, so menu changes go to Herdr's shared state under the key `tabs-enriched.pins`, saved in `shared.json` as `{ "added": [...], "removed": [...] }`. Pinned tabs are the configured entries minus `removed`, then `added` in the order they were pinned. Unpinning a configured entry lasts across restarts until the entry leaves `pinned.json`. When Smart Tabs next loads, it forgets the unpin, so adding the entry back pins it again.
 
 Gotchas:
 
-- Smart Tabs finds a pinned tab by its name and its mod pane. Renaming a pinned tab turns it into an ordinary tab, and a new pinned tab opens. Double-click rename is off for pinned tabs.
-- Closing a pinned tab from its menu reopens it. Remove the entry from configuration to unpin it.
+- Smart Tabs finds a pinned tab by its name and its mod pane. Renaming a pinned tab turns it into an ordinary tab, and a new pinned tab opens. Rename is off for pinned tabs, by double-click and in the menu.
+- A pinned tab closed another way, for example with `tab.close`, opens again. Unpin it first.
 - If a pinned tab cannot open, for example because its mod is not installed, Herdr logs the error and Smart Tabs tries that space again only after the mod reloads.
 - Pinned tabs open in a space when it is first shown. While a space still has a pinned tab, closing its last ordinary tab does not close the space; close the space from the sidebar.
 
 ### Provider contract
 
-A provider is an ordinary mod, for example `mods/my-board/main.js` with `{ "place": "none" }` in `mod.json`. It renders its view in the tab's pane and reads its own state from `shared`, `localStorage`, or files. Every space has its own copy, so keep data that must be identical across spaces in `shared` state. Only the copy in the shown tab receives `<mod>.<command>` key commands.
+A provider is an ordinary mod, for example `mods/my-board/main.js` with `{ "place": "none" }` in `mod.json`, plus an optional one-color `mods/my-board/icon.svg` for its pinned tab. It renders its view in the tab's pane and reads its own state from `shared`, `localStorage`, or files. Every space has its own copy, so keep data that must be identical across spaces in `shared` state. Only the copy in the shown tab receives `<mod>.<command>` key commands.
 
 A provider adds buttons to the top-right of the tab bar, before Files and Changes, by publishing a list under the shared key `tab-controls:<mod>`:
 
@@ -109,7 +120,7 @@ Select the Navigation layout after activation if you installed it. Each mod ship
 
 Development checks used Herdr App 0.1.11 and Core 0.1.16 on Linux in a private display and Core session. The mod loader checks and live picker interactions ran through Nix-store file symlinks. No Windows or macOS runtime checks have been performed.
 
-The preview uses synthetic agent reports, not private sessions. `node --test` checks the Space Shortcuts naming, worktree lookup, and direnv rules, and how Smart Tabs reads pinned tabs and decides which to open or move. Before updating the mods, run `herdr-app check` on each mod folder and exercise the visible App behavior in an isolated session. Keep the title helper in both self-contained modules consistent.
+The preview uses synthetic agent reports, not private sessions. `node --test` checks the Space Shortcuts naming, worktree lookup, and direnv rules, and how Smart Tabs reads pinned tabs, combines configured and menu pins, builds the tab menu, and decides which tabs to open or move. Before updating the mods, run `herdr-app check` on each mod folder and exercise the visible App behavior in an isolated session. Keep the title helper in both self-contained modules consistent.
 
 Herdr's community catalog discovers public GitHub repositories with the `herdr-layout` topic. The `navigation/` folder contains the layout, mods, recipe, and preview required by the catalog. Publishing the repository and setting the topic are separate from installing it locally.
 

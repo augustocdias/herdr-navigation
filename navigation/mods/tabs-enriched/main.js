@@ -1,6 +1,8 @@
 import { View, div, svg, image } from "gpui-kit";
-import { h_flex } from "gpui-base";
-import { spaces, panes, terminals, run, openOverlay, theme, window, shared, layout, settings, machines, appHome, readTextFile, notify } from "herdr";
+import { h_flex, v_flex } from "gpui-base";
+import { spaces, panes, terminals, run, openOverlay, closeOverlay, props, keys, theme, window, shared, setShared, layout, settings, machines, appHome, readTextFile, notify } from "herdr";
+
+const PINS = "tabs-enriched.pins";
 
 function find(node, id) {
   if (node?.id === id) return node;
@@ -13,7 +15,15 @@ function find(node, id) {
 
 export default class Tabs extends View {
   init(_props, cx) {
+    // Smart Tabs opens itself as the tab menu (see renderMenu).
+    if (props()?.items) {
+      this.at = 0;
+      this.handle = cx.focus_handle();
+      this.handle.focus();
+      return;
+    }
     this.pressed = null;
+    this.icons = new Map();
     this.panels = JSON.parse(localStorage.getItem("panels") ?? "{}");
     this.pinned = [];
     this.opening = new Map();
@@ -22,6 +32,8 @@ export default class Tabs extends View {
     cx.spawn(async (cx) => {
       try {
         this.pinned = parsePinned(await readTextFile(`${appHome()}/mods/tabs-enriched/pinned.json`));
+        const state = readPins(shared(PINS)), kept = prunePins(this.pinned, state);
+        if (kept.removed.length !== state.removed.length) setShared(PINS, kept);
       } catch (error) {
         notify({ title: "Smart Tabs: pinned.json ignored", body: String(error?.message ?? error), level: "warning" });
       }
@@ -39,6 +51,61 @@ export default class Tabs extends View {
       if (name === "tab.move") this.movedAt = Date.now();
       run(name, args);
     }
+  }
+
+  // A provider's own `icon.svg`, else Herdr's pin glyph: mod panes carry no program icon.
+  modIcon(mod, cx) {
+    if (!this.icons.has(mod)) {
+      this.icons.set(mod, "mods/workspace-chrome/pin.svg");
+      cx.spawn(async (cx) => {
+        if (await readTextFile(`${appHome()}/mods/${mod}/icon.svg`).catch(() => null) === null) return;
+        this.icons.set(mod, `mods/${mod}/icon.svg`);
+        cx.notify();
+      });
+    }
+    return this.icons.get(mod);
+  }
+
+  choose(i, cx) {
+    const { items, overlay, declared } = props(), it = items[i];
+    if (!it || this.done) return;
+    if (it[1] !== "pin") { closeOverlay(overlay); return run(it[1], it[2]); }
+    const { entry, on, rename } = it[2];
+    const commit = () => {
+      if (this.done) return;
+      this.done = true;
+      setShared(PINS, setPin(declared, readPins(shared(PINS)), entry, on));
+      closeOverlay(overlay);
+    };
+    if (!rename) return commit();
+    // Pins match tabs by name: pinning before the rename lands would open a second tab.
+    run("tab.rename", rename);
+    const start = Date.now();
+    cx.timer.every(50, () => {
+      if (Date.now() > start + 2000 || spaces().some(s => s.tabs.some(t => t.id === rename.id && t.name === rename.name))) commit();
+    });
+  }
+
+  // Herdr's tab menu (the shipped `menu` mod) with Pin and Unpin; its items are fixed, so Smart Tabs draws its own.
+  renderMenu() {
+    const t = theme(), list = props().items;
+    const hint = (name) => keys().find(b => b.section === "global" && b.action === name)?.keys ?? "";
+    return v_flex().id("menu").track_focus(this.handle).w_full().min_h(0).p(5).bg(t.popover).text_size(12.8)
+      .on_key_down((e, cx) => {
+        if (e.key === "down") this.at = (this.at + 1) % list.length;
+        else if (e.key === "up") this.at = (this.at + list.length - 1) % list.length;
+        else if (e.key === "enter") this.choose(this.at, cx);
+        else if (e.key === "escape") closeOverlay(props().overlay);
+        else return;
+        cx.notify();
+      })
+      .children(list.map((it, i) => v_flex()
+        .when(i > 0 && it[1] === "tab.close", el => el.child(div().mx(7).my(4).h(1).bg(t.border)))
+        .child(h_flex().id(`mi-${i}`).h(31).px(8).gap(9).rounded(7).items_center().justify_between().text_color(t.foreground)
+          .when(i === this.at, el => el.bg(t.selected)).hover(s => s.bg(t.hover)).on_click((_e, cx) => this.choose(i, cx))
+          .child(svg(`mods/workspace-chrome/${it[3]}.svg`).size(14).flex_none().text_color(t.muted))
+          .child(div().flex_1().child(it[0]))
+          .child(div().text_size(11).text_color(t.dim).child(hint(it[1]))))));
   }
 
   // The side panel is remembered per space: switching shows that space's choice
@@ -69,13 +136,15 @@ export default class Tabs extends View {
     localStorage.setItem("panels", JSON.stringify(this.panels));
   }
 
-  render() {
+  render(cx) {
+    if (this.handle) return this.renderMenu();
     const t = theme();
     const space = spaces().find(p => p.active);
     const shown = space?.tabs ?? [];
     const paneList = panes();
     const terminalMap = new Map(terminals().map(t => [t.address, t]));
-    const plan = space && this.pinned.length ? pinnedPlan(this.pinned, space, paneList) : null;
+    const pins = readPins(shared(PINS)), entries = effectivePins(this.pinned, pins);
+    const plan = space && entries.length ? pinnedPlan(entries, space, paneList) : null;
     if (plan) this.syncPinned(space, plan);
     const pinned = plan?.pinned ?? new Set();
     const stop = (_e, cx) => cx.stop_propagation();
@@ -85,7 +154,9 @@ export default class Tabs extends View {
       const pin = pinned.has(c.id);
       const program = panes().find(p => p.tab === c.id && p.program?.agent)?.program ?? panes().find(p => p.tab === c.id)?.program;
       const title = tabTitle(c, paneList, terminalMap);
-    const name = title.text;
+      const name = title.text;
+      // A pinned tab's menu names the mod it is pinned by, not any mod split into it.
+      const modPane = paneList.find(p => p.tab === c.id && p.mod && (!pin || entries.some(e => e.label === c.name && e.mod === p.mod)));
       return h_flex().id(`tab-${c.id}`).h(29).px(10).gap(7).rounded(7).items_center().flex_none().text_size(12.8)
         .border(1).border_color(c.active ? t.border : t.chrome).bg(c.active ? t.raised : t.chrome).text_color(c.active ? t.foreground : t.muted)
         .hover(s => s.bg(t.hover))
@@ -95,10 +166,12 @@ export default class Tabs extends View {
           if (from !== null && from !== i) run("tab.move", { id: shown[from].id, index: space.tabs.findIndex(x => x.id === c.id) + 1 });
           else run("tab.select", { id: c.id });
         })
-        .on_mouse_down("right", (_e, cx) => { cx.stop_propagation(); openOverlay({ mod: "menu", kind: "popup", width: 200, props: { tab: "tab", target: { id: c.id, space: space.id } } }); })
-        .when(pin, el => el.child(div().w(3).h(12).rounded(2).flex_none().bg(t.accent)))
-        .when(Boolean(program?.icon), el => el.child(program.tint ? svg(program.icon).size(14).text_color(t.muted) : image(program.icon).size(14)))
-        .child(div().max_w(480).truncate().tooltip(title.full).child(c.zoomed ? `${name} Z` : name))
+        .on_mouse_down("right", (_e, cx) => { cx.stop_propagation(); openOverlay({ mod: "tabs-enriched", kind: "popup", width: 200, props: { items: tabMenu(c, space, pin, modPane), declared: this.pinned } }); })
+        // A pinned tab shows only its icon; the tooltip names it.
+        .when(pin, el => el.child(div().id(`pin-${c.id}`).tooltip(title.full).child(svg(this.modIcon(modPane?.mod, cx)).size(14).text_color(c.active ? t.foreground : t.muted))))
+        .when(pin && c.zoomed, el => el.child("Z"))
+        .when(!pin && Boolean(program?.icon), el => el.child(program.tint ? svg(program.icon).size(14).text_color(t.muted) : image(program.icon).size(14)))
+        .when(!pin, el => el.child(div().max_w(480).truncate().tooltip(title.full).child(c.zoomed ? `${name} Z` : name)))
         .when(c.status === "working", el => el.child(svg("mods/workspace-chrome/spinner.svg").size(12).flex_none().text_color(t.working).spin(900)))
         .when(c.status === "blocked" || c.status === "done", el => el.child(div().size(6).rounded(3).bg(t[c.status])))
         .when(c.active && !pin, el => el.child(div().id(`close-${c.id}`).text_color(t.dim).on_mouse_down("left", stop).on_click((_e, cx) => { cx.stop_propagation(); run("tab.close", { id: c.id }); }).child(svg("mods/pane/close.svg").size(12))));
@@ -155,11 +228,55 @@ export function parsePinned(text) {
   if (text === null) return [];
   const list = JSON.parse(text);
   if (!Array.isArray(list)) throw new Error("pinned.json must be a list");
+  return pinList(list);
+}
+
+function pinList(list) {
   const pinned = new Map();
   for (const p of list) {
     if (typeof p?.label === "string" && p.label && typeof p.mod === "string" && p.mod) pinned.set(`${p.mod}\n${p.label}`, { label: p.label, mod: p.mod });
   }
   return [...pinned.values()];
+}
+
+// Pins and unpins from the tab menu: { added, removed } in shared state, which Herdr
+// saves in shared.json. Declared entries minus removed ones come first, then added ones.
+const same = (a, b) => a.label === b.label && a.mod === b.mod;
+
+export function readPins(value) {
+  const list = v => Array.isArray(v) ? pinList(v) : [];
+  return { added: list(value?.added), removed: list(value?.removed) };
+}
+
+export function effectivePins(declared, pins) {
+  return [...declared.filter(p => !pins.removed.some(r => same(r, p))), ...pins.added.filter(p => !declared.some(d => same(d, p)))];
+}
+
+export function setPin(declared, pins, entry, on) {
+  const added = pins.added.filter(p => !same(p, entry)), removed = pins.removed.filter(p => !same(p, entry));
+  const isDeclared = declared.some(p => same(p, entry));
+  if (on && !isDeclared) added.push(entry);
+  if (!on && isDeclared) removed.push(entry);
+  return { added, removed };
+}
+
+// An unpin outlives restarts until its entry leaves the configuration.
+export function prunePins(declared, pins) {
+  return { added: pins.added, removed: pins.removed.filter(p => declared.some(d => same(d, p))) };
+}
+
+// Items as [label, command, args, icon]; "pin" applies setPin(args.entry, args.on) when chosen.
+// Pin is offered only for mod tabs; an unnamed one is named after its mod first, since a number would move.
+export function tabMenu(tab, space, pinned, modPane) {
+  const entry = modPane && { label: tab.named ? tab.name : modPane.title, mod: modPane.mod };
+  const create = ["New tab", "tab.new", { space: space.id }, "plus"];
+  if (pinned) return [create, ["Unpin", "pin", { entry, on: false }, "pin-off"]];
+  return [
+    ["Rename", "tab.rename", { id: tab.id }, "square-pen"],
+    create,
+    ...(entry ? [["Pin", "pin", { entry, on: true, rename: tab.named ? null : { id: tab.id, name: entry.label } }, "pin"]] : []),
+    ["Close", "tab.close", { id: tab.id }, "x"],
+  ];
 }
 
 export function pinnedPlan(entries, space, paneList) {

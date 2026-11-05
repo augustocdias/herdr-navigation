@@ -6,14 +6,14 @@ import assert from "node:assert/strict";
 
 const stubs = {
   "gpui-kit": "export class View {} export const div = () => {}, svg = () => {}, image = () => {};",
-  "gpui-base": "export const h_flex = () => {};",
-  herdr: "export const spaces = () => [], panes = () => [], terminals = () => [], run = () => {}, openOverlay = () => {}, theme = () => {}, window = () => {}, shared = () => {}, layout = () => {}, settings = () => {}, machines = () => [], appHome = () => '', readTextFile = async () => null, notify = () => {};",
+  "gpui-base": "export const h_flex = () => {}, v_flex = () => {};",
+  herdr: "export const spaces = () => [], panes = () => [], terminals = () => [], run = () => {}, openOverlay = () => {}, closeOverlay = () => {}, props = () => null, keys = () => [], theme = () => {}, window = () => {}, shared = () => {}, setShared = () => {}, layout = () => {}, settings = () => {}, machines = () => [], appHome = () => '', readTextFile = async () => null, notify = () => {};",
 };
 registerHooks({
   resolve: (specifier, context, next) =>
     specifier in stubs ? { url: `data:text/javascript,${encodeURIComponent(stubs[specifier])}`, shortCircuit: true } : next(specifier, context),
 });
-const { pinnedPlan, pinnedCommands, parsePinned } = await import("../navigation/mods/tabs-enriched/main.js");
+const { pinnedPlan, pinnedCommands, parsePinned, readPins, effectivePins, setPin, prunePins, tabMenu } = await import("../navigation/mods/tabs-enriched/main.js");
 
 const board = { label: "Board", mod: "board" };
 const notes = { label: "Notes", mod: "notes" };
@@ -82,4 +82,46 @@ test("a pinned tab that cannot open is not retried", () => {
   const space = { id: "s", tabs: [{ ...tab("t1", 1, "1"), active: true }] };
   assert.equal(pinnedCommands(pinnedPlan([board], space, []), space, opening).length, 1);
   for (let i = 0; i < 3; i++) assert.deepEqual(pinnedCommands(pinnedPlan([board], space, []), space, opening), []);
+});
+
+const none = { added: [], removed: [] };
+
+test("runtime pins follow the declared ones; an unpin hides a declared one", () => {
+  assert.deepEqual(effectivePins([board], { added: [notes, board], removed: [] }), [board, notes]);
+  assert.deepEqual(effectivePins([board, notes], { added: [], removed: [board] }), [notes]);
+});
+
+test("unpinning a declared tab is remembered; unpinning a runtime pin forgets it", () => {
+  assert.deepEqual(setPin([board], none, board, false), { added: [], removed: [board] });
+  assert.deepEqual(setPin([], { added: [notes], removed: [] }, notes, false), none);
+});
+
+test("pinning undoes an unpin or adds a runtime pin", () => {
+  assert.deepEqual(setPin([board], { added: [], removed: [board] }, board, true), none);
+  assert.deepEqual(setPin([board], none, notes, true), { added: [notes], removed: [] });
+  assert.deepEqual(setPin([], { added: [notes], removed: [] }, notes, true), { added: [notes], removed: [] });
+});
+
+test("an unpin lasts until its entry leaves the configuration", () => {
+  const pins = { added: [], removed: [board, notes] };
+  assert.deepEqual(prunePins([board], pins), { added: [], removed: [board] });
+});
+
+test("stored pins that are not entry lists are ignored", () => {
+  assert.deepEqual(readPins(undefined), none);
+  assert.deepEqual(readPins({ added: "x", removed: [board, { label: 1 }] }), { added: [], removed: [board] });
+});
+
+test("the tab menu offers Unpin and no Close for a pinned tab", () => {
+  const items = tabMenu(tab("p", 1, "Board"), { id: "s" }, true, { mod: "board", title: "board" });
+  assert.deepEqual(items.map(i => i[0]), ["New tab", "Unpin"]);
+  assert.deepEqual(items[1][2], { entry: board, on: false });
+});
+
+test("the tab menu offers Pin only for a mod tab, named after its mod when unnamed", () => {
+  const space = { id: "s" };
+  assert.deepEqual(tabMenu(tab("t1", 1, "1"), space, false, undefined).map(i => i[0]), ["Rename", "New tab", "Close"]);
+  const items = tabMenu({ id: "t2", index: 2, name: "2", named: false }, space, false, { mod: "notes", title: "notes" });
+  assert.deepEqual(items.map(i => i[0]), ["Rename", "New tab", "Pin", "Close"]);
+  assert.deepEqual(items[2][2], { entry: { label: "notes", mod: "notes" }, on: true, rename: { id: "t2", name: "notes" } });
 });
