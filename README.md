@@ -32,9 +32,9 @@ programs.herdr-navigation.pinnedTabs = [
 
 The module writes the list to `mods/tabs-enriched/pinned.json` as `[{ "label": "Board", "mod": "my-board" }]`. Without Home Manager, write that file yourself. An entry has only a tab name and a mod. Smart Tabs passes no props, so the provider owns its settings.
 
-When a space is shown without one of its pinned tabs, Smart Tabs runs `tab.new { space, name: label, mod }`, then selects the tab you were on again. Pinned tabs stay first, in configured order, and they are real tabs: Ctrl+number, the picker, and tab state work as they do for any tab. A pinned tab shows only an icon, with its name in the tooltip, and has no close button. A divider separates pinned tabs from ordinary tabs. Smart Tabs does not change other tabs, their names, or any layout.
+When a space is shown without one of its pinned tabs, Smart Tabs runs `tab.new { space, name: label, mod }`, then selects the tab you were on again. Pinned tabs stay first, in configured order, and they are real tabs: Ctrl+number, the picker, and tab state work as they do for any tab. A pinned tab shows only an icon, with no text: no title, zoom marker or status. Its name appears only in the tooltip, and it has no close button. A divider separates pinned tabs from ordinary tabs. Smart Tabs does not change other tabs, their names, or any layout.
 
-Herdr gives mod panes no program icon, so the icon is the provider's own `mods/<mod>/icon.svg`, drawn tinted. Without that file, Smart Tabs draws Herdr's pin glyph and looks for the file again every 2 seconds while tabs render, so an icon written after Smart Tabs loads still appears.
+Herdr gives mod panes no program icon, so the icon is the provider's own `mods/<mod>/icon.svg`, drawn tinted. An ordinary tab holding a mod pane shows the same icon before its title, unless the tab already shows a program icon. Without that file, Smart Tabs draws Herdr's pin glyph and looks for the file again every 2 seconds while tabs render, so an icon written after Smart Tabs loads still appears.
 
 ### Pin and Unpin
 

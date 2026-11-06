@@ -13,7 +13,7 @@ registerHooks({
   resolve: (specifier, context, next) =>
     specifier in stubs ? { url: `data:text/javascript,${encodeURIComponent(stubs[specifier])}`, shortCircuit: true } : next(specifier, context),
 });
-const { pinnedPlan, pinnedCommands, parsePinned, readPins, effectivePins, setPin, prunePins, loadPinned, iconLookup, tabMenu } = await import("../navigation/mods/tabs-enriched/main.js");
+const { pinnedPlan, pinnedCommands, parsePinned, readPins, effectivePins, setPin, prunePins, loadPinned, iconLookup, tabMenu, tabFace } = await import("../navigation/mods/tabs-enriched/main.js");
 
 const board = { label: "Board", mod: "board" };
 const notes = { label: "Notes", mod: "notes" };
@@ -148,4 +148,25 @@ test("a missing provider icon is checked again later; a found one is kept", () =
   assert.deepEqual(iconLookup(icons, "board", 2100), { path: pin, check: true });
   icons.set("board", { found: true, at: 2200 });
   assert.deepEqual(iconLookup(icons, "board", 99999), { path: "mods/board/icon.svg", check: false });
+});
+
+const zoomed = { id: "p", name: "Shepherd", named: true, zoomed: true, status: "working" };
+const title = { text: "herdr-hermes-shepherd", full: "herdr-hermes-shepherd" };
+
+test("a pinned tab is its provider icon alone, zoomed or not, named only in the tooltip", () => {
+  const face = tabFace(zoomed, true, title, null, "shepherd");
+  assert.deepEqual(face, { icon: { mod: "shepherd" }, text: null, tooltip: "Shepherd", status: false });
+  assert.deepEqual(tabFace({ ...zoomed, zoomed: false }, true, title, null, "shepherd"), face);
+});
+
+test("an ordinary mod tab shows its provider icon beside its Smart Tabs title", () => {
+  assert.deepEqual(tabFace(zoomed, false, title, null, "shepherd"),
+    { icon: { mod: "shepherd" }, text: "herdr-hermes-shepherd Z", tooltip: "herdr-hermes-shepherd", status: true });
+});
+
+test("an ordinary tab keeps its program icon, and a plain terminal has none", () => {
+  const program = { icon: "claude.svg", tint: true };
+  assert.deepEqual(tabFace({ ...zoomed, zoomed: false }, false, title, program, "shepherd").icon, { program });
+  assert.deepEqual(tabFace({ ...zoomed, zoomed: false }, false, title, {}, "shepherd").icon, { mod: "shepherd" });
+  assert.equal(tabFace({ ...zoomed, zoomed: false }, false, title, {}, undefined).icon, null);
 });

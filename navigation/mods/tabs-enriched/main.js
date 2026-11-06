@@ -152,10 +152,9 @@ export default class Tabs extends View {
     const item = (c, i) => {
       const pin = pinned.has(c.id);
       const program = panes().find(p => p.tab === c.id && p.program?.agent)?.program ?? panes().find(p => p.tab === c.id)?.program;
-      const title = tabTitle(c, paneList, terminalMap);
-      const name = title.text;
       // A pinned tab's menu names the mod it is pinned by, not any mod split into it.
       const modPane = paneList.find(p => p.tab === c.id && p.mod && (!pin || entries.some(e => e.label === c.name && e.mod === p.mod)));
+      const face = tabFace(c, pin, pin ? null : tabTitle(c, paneList, terminalMap), program, modPane?.mod);
       return h_flex().id(`tab-${c.id}`).h(29).px(10).gap(7).rounded(7).items_center().flex_none().text_size(12.8)
         .border(1).border_color(c.active ? t.border : t.chrome).bg(c.active ? t.raised : t.chrome).text_color(c.active ? t.foreground : t.muted)
         .hover(s => s.bg(t.hover))
@@ -166,13 +165,11 @@ export default class Tabs extends View {
           else run("tab.select", { id: c.id });
         })
         .on_mouse_down("right", (_e, cx) => { cx.stop_propagation(); openOverlay({ mod: "tabs-enriched", kind: "popup", width: 200, props: { items: tabMenu(c, space, pin, modPane), declared: this.pinned } }); })
-        // A pinned tab shows only its icon; the tooltip names it.
-        .when(pin, el => el.child(div().id(`pin-${c.id}`).tooltip(title.full).child(svg(this.modIcon(modPane?.mod, cx)).size(14).text_color(c.active ? t.foreground : t.muted))))
-        .when(pin && c.zoomed, el => el.child("Z"))
-        .when(!pin && Boolean(program?.icon), el => el.child(program.tint ? svg(program.icon).size(14).text_color(t.muted) : image(program.icon).size(14)))
-        .when(!pin, el => el.child(div().max_w(480).truncate().tooltip(title.full).child(c.zoomed ? `${name} Z` : name)))
-        .when(c.status === "working", el => el.child(svg("mods/workspace-chrome/spinner.svg").size(12).flex_none().text_color(t.working).spin(900)))
-        .when(c.status === "blocked" || c.status === "done", el => el.child(div().size(6).rounded(3).bg(t[c.status])))
+        .when(pin || Boolean(face.icon?.mod), el => el.child(div().id(`icon-${c.id}`).when(pin, d => d.tooltip(face.tooltip)).child(svg(this.modIcon(face.icon.mod, cx)).size(14).text_color(c.active ? t.foreground : t.muted))))
+        .when(Boolean(face.icon?.program), el => el.child(face.icon.program.tint ? svg(face.icon.program.icon).size(14).text_color(t.muted) : image(face.icon.program.icon).size(14)))
+        .when(face.text !== null, el => el.child(div().max_w(480).truncate().tooltip(face.tooltip).child(face.text)))
+        .when(face.status && c.status === "working", el => el.child(svg("mods/workspace-chrome/spinner.svg").size(12).flex_none().text_color(t.working).spin(900)))
+        .when(face.status && (c.status === "blocked" || c.status === "done"), el => el.child(div().size(6).rounded(3).bg(t[c.status])))
         .when(c.active && !pin, el => el.child(div().id(`close-${c.id}`).text_color(t.dim).on_mouse_down("left", stop).on_click((_e, cx) => { cx.stop_propagation(); run("tab.close", { id: c.id }); }).child(svg("mods/pane/close.svg").size(12))));
     };
     const root = layout(), sidebar = find(root, "sidebar"), w = window();
@@ -278,6 +275,15 @@ export function iconLookup(icons, mod, now) {
   const check = !state?.pending && now >= (state?.at ?? -Infinity) + ICON_RETRY;
   if (check) icons.set(mod, { pending: true, at: now });
   return { path: "mods/workspace-chrome/pin.svg", check };
+}
+
+// What a tab draws. A pinned tab is only its provider icon, named in the tooltip, without
+// Smart Tabs titles, markers or status. An ordinary tab keeps its title and zoom marker,
+// with its program icon, else its mod's icon.
+export function tabFace(tab, pinned, title, program, mod) {
+  if (pinned) return { icon: { mod }, text: null, tooltip: tab.name, status: false };
+  const icon = program?.icon ? { program } : mod ? { mod } : null;
+  return { icon, text: tab.zoomed ? `${title.text} Z` : title.text, tooltip: title.full, status: true };
 }
 
 // Items as [label, command, args, icon]; "pin" applies setPin(args.entry, args.on) when chosen.
