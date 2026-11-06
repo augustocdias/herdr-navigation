@@ -31,9 +31,10 @@ export default class Tabs extends View {
     // A Home Manager rebuild replaces this file, which reloads the mod.
     cx.spawn(async (cx) => {
       try {
-        this.pinned = parsePinned(await readTextFile(`${appHome()}/mods/tabs-enriched/pinned.json`));
-        const state = readPins(shared(PINS)), kept = prunePins(this.pinned, state);
-        if (kept.removed.length !== state.removed.length) setShared(PINS, kept);
+        const text = await readTextFile(`${appHome()}/mods/tabs-enriched/pinned.json`);
+        const state = readPins(shared(PINS)), loaded = loadPinned(text, state);
+        this.pinned = loaded.declared;
+        if (loaded.pins.removed.length !== state.removed.length) setShared(PINS, loaded.pins);
       } catch (error) {
         notify({ title: "Smart Tabs: pinned.json ignored", body: String(error?.message ?? error), level: "warning" });
       }
@@ -55,15 +56,13 @@ export default class Tabs extends View {
 
   // A provider's own `icon.svg`, else Herdr's pin glyph: mod panes carry no program icon.
   modIcon(mod, cx) {
-    if (!this.icons.has(mod)) {
-      this.icons.set(mod, "mods/workspace-chrome/pin.svg");
-      cx.spawn(async (cx) => {
-        if (await readTextFile(`${appHome()}/mods/${mod}/icon.svg`).catch(() => null) === null) return;
-        this.icons.set(mod, `mods/${mod}/icon.svg`);
-        cx.notify();
-      });
-    }
-    return this.icons.get(mod);
+    const { path, check } = iconLookup(this.icons, mod, Date.now());
+    if (check) cx.spawn(async (cx) => {
+      const found = await readTextFile(`${appHome()}/mods/${mod}/icon.svg`).catch(() => null) !== null;
+      this.icons.set(mod, { found, at: Date.now() });
+      if (found) cx.notify();
+    });
+    return path;
   }
 
   choose(i, cx) {
@@ -81,8 +80,8 @@ export default class Tabs extends View {
     // Pins match tabs by name: pinning before the rename lands would open a second tab.
     run("tab.rename", rename);
     const start = Date.now();
-    cx.timer.every(50, () => {
-      if (Date.now() > start + 2000 || spaces().some(s => s.tabs.some(t => t.id === rename.id && t.name === rename.name))) commit();
+    const wait = cx.timer.every(50, () => {
+      if (Date.now() > start + 2000 || spaces().some(s => s.tabs.some(t => t.id === rename.id && t.name === rename.name))) { wait.cancel(); commit(); }
     });
   }
 
@@ -197,8 +196,8 @@ export default class Tabs extends View {
     // Mods in the shown tab may add top-right controls (see README: Pinned tabs).
     const activeTab = shown.find(c => c.active);
     const controls = [...new Set(paneList.filter(p => p.tab === activeTab?.id && p.mod).map(p => p.mod))]
-      .flatMap(mod => [].concat(shared(`tab-controls:${mod}`) ?? []).filter(c => typeof c?.label === "string" && typeof c.command === "string").map(c => ({ ...c, mod })));
-    const control = c => h_flex().id(`control-${c.mod}-${c.id ?? c.label}`).h(26).px(8).gap(5).flex_none().items_center().rounded(6)
+      .flatMap(mod => [].concat(shared(`tab-controls:${mod}`) ?? []).map((c, i) => ({ ...c, mod, key: c?.id ?? `#${i}` })).filter(c => typeof c.label === "string" && typeof c.command === "string"));
+    const control = c => h_flex().id(`control-${c.mod}-${c.key}`).h(26).px(8).gap(5).flex_none().items_center().rounded(6)
       .text_size(12).bg(c.active ? t.selected : t.chrome).text_color(c.active ? t.foreground : t.muted)
       .hover(s => s.bg(t.hover)).on_mouse_down("left", stop).on_click(() => run(c.command, c.args ?? {}))
       .when(typeof c.icon === "string", el => el.child(svg(c.icon).size(14))).child(c.label);
@@ -265,10 +264,26 @@ export function prunePins(declared, pins) {
   return { added: pins.added, removed: pins.removed.filter(p => declared.some(d => same(d, p))) };
 }
 
+// A missing pinned.json (none configured, or mid-activation) prunes nothing: only a file that was read can drop an unpin.
+export function loadPinned(text, pins) {
+  const declared = parsePinned(text);
+  return { declared, pins: text === null ? pins : prunePins(declared, pins) };
+}
+
+// A found icon is kept; a miss is checked again after ICON_RETRY ms, since a provider may write its icon after Smart Tabs loads.
+const ICON_RETRY = 2000;
+export function iconLookup(icons, mod, now) {
+  const state = icons.get(mod);
+  if (state?.found) return { path: `mods/${mod}/icon.svg`, check: false };
+  const check = !state?.pending && now >= (state?.at ?? -Infinity) + ICON_RETRY;
+  if (check) icons.set(mod, { pending: true, at: now });
+  return { path: "mods/workspace-chrome/pin.svg", check };
+}
+
 // Items as [label, command, args, icon]; "pin" applies setPin(args.entry, args.on) when chosen.
 // Pin is offered only for mod tabs; an unnamed one is named after its mod first, since a number would move.
 export function tabMenu(tab, space, pinned, modPane) {
-  const entry = modPane && { label: tab.named ? tab.name : modPane.title, mod: modPane.mod };
+  const entry = modPane && { label: tab.named ? tab.name : modPane.title || modPane.mod, mod: modPane.mod };
   const create = ["New tab", "tab.new", { space: space.id }, "plus"];
   if (pinned) return [create, ["Unpin", "pin", { entry, on: false }, "pin-off"]];
   return [

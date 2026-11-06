@@ -13,7 +13,7 @@ registerHooks({
   resolve: (specifier, context, next) =>
     specifier in stubs ? { url: `data:text/javascript,${encodeURIComponent(stubs[specifier])}`, shortCircuit: true } : next(specifier, context),
 });
-const { pinnedPlan, pinnedCommands, parsePinned, readPins, effectivePins, setPin, prunePins, tabMenu } = await import("../navigation/mods/tabs-enriched/main.js");
+const { pinnedPlan, pinnedCommands, parsePinned, readPins, effectivePins, setPin, prunePins, loadPinned, iconLookup, tabMenu } = await import("../navigation/mods/tabs-enriched/main.js");
 
 const board = { label: "Board", mod: "board" };
 const notes = { label: "Notes", mod: "notes" };
@@ -124,4 +124,28 @@ test("the tab menu offers Pin only for a mod tab, named after its mod when unnam
   const items = tabMenu({ id: "t2", index: 2, name: "2", named: false }, space, false, { mod: "notes", title: "notes" });
   assert.deepEqual(items.map(i => i[0]), ["Rename", "New tab", "Pin", "Close"]);
   assert.deepEqual(items[2][2], { entry: { label: "notes", mod: "notes" }, on: true, rename: { id: "t2", name: "notes" } });
+});
+
+test("a missing pinned.json keeps unpins; a read one prunes them", () => {
+  const pins = { added: [notes], removed: [board] };
+  assert.deepEqual(loadPinned(null, pins), { declared: [], pins });
+  assert.deepEqual(loadPinned("[]", pins), { declared: [], pins: { added: [notes], removed: [] } });
+  assert.deepEqual(loadPinned(JSON.stringify([board]), pins), { declared: [board], pins });
+});
+
+test("an unnamed mod tab without a pane title is pinned under its mod name", () => {
+  const items = tabMenu({ id: "t2", index: 2, name: "2", named: false }, { id: "s" }, false, { mod: "notes", title: "" });
+  assert.deepEqual(items[2][2], { entry: { label: "notes", mod: "notes" }, on: true, rename: { id: "t2", name: "notes" } });
+});
+
+test("a missing provider icon is checked again later; a found one is kept", () => {
+  const icons = new Map(), pin = "mods/workspace-chrome/pin.svg";
+  assert.deepEqual(iconLookup(icons, "board", 0), { path: pin, check: true });
+  // While the read is pending, renders ask nothing.
+  assert.deepEqual(iconLookup(icons, "board", 10), { path: pin, check: false });
+  icons.set("board", { found: false, at: 100 });
+  assert.deepEqual(iconLookup(icons, "board", 1000), { path: pin, check: false });
+  assert.deepEqual(iconLookup(icons, "board", 2100), { path: pin, check: true });
+  icons.set("board", { found: true, at: 2200 });
+  assert.deepEqual(iconLookup(icons, "board", 99999), { path: "mods/board/icon.svg", check: false });
 });

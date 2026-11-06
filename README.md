@@ -34,16 +34,16 @@ The module writes the list to `mods/tabs-enriched/pinned.json` as `[{ "label": "
 
 When a space is shown without one of its pinned tabs, Smart Tabs runs `tab.new { space, name: label, mod }`, then selects the tab you were on again. Pinned tabs stay first, in configured order, and they are real tabs: Ctrl+number, the picker, and tab state work as they do for any tab. A pinned tab shows only an icon, with its name in the tooltip, and has no close button. A divider separates pinned tabs from ordinary tabs. Smart Tabs does not change other tabs, their names, or any layout.
 
-Herdr gives mod panes no program icon, so the icon is the provider's own `mods/<mod>/icon.svg`, drawn tinted. Without that file, Smart Tabs draws Herdr's pin glyph.
+Herdr gives mod panes no program icon, so the icon is the provider's own `mods/<mod>/icon.svg`, drawn tinted. Without that file, Smart Tabs draws Herdr's pin glyph and looks for the file again every 2 seconds while tabs render, so an icon written after Smart Tabs loads still appears.
 
 ### Pin and Unpin
 
 Right-click a tab for Smart Tabs' tab menu: Herdr's Rename, New tab and Close, plus pinning. A pinned tab's menu has New tab and Unpin, but no Close or Rename. An ordinary tab holding a mod pane has Pin. Terminal tabs cannot be pinned.
 
-- Pin applies in every space, like a configured entry. Its label is the tab's name. An unnamed tab is first renamed after its mod, because its number changes as tabs move.
+- Pin applies in every space, like a configured entry. Its label is the tab's name. An unnamed tab is first renamed after its mod's pane title, or the mod name when the pane has none, because its number changes as tabs move.
 - Unpin applies in every space. Each copy stays open as an ordinary tab that you can close, and new spaces no longer get one.
 
-`pinned.json` is read-only under Home Manager, so menu changes go to Herdr's shared state under the key `tabs-enriched.pins`, saved in `shared.json` as `{ "added": [...], "removed": [...] }`. Pinned tabs are the configured entries minus `removed`, then `added` in the order they were pinned. Unpinning a configured entry lasts across restarts until the entry leaves `pinned.json`. When Smart Tabs next loads, it forgets the unpin, so adding the entry back pins it again.
+`pinned.json` is read-only under Home Manager, so menu changes go to Herdr's shared state under the key `tabs-enriched.pins`, saved in `shared.json` as `{ "added": [...], "removed": [...] }`. Pinned tabs are the configured entries minus `removed`, then `added` in the order they were pinned. Unpinning a configured entry lasts across restarts until the entry leaves `pinned.json`. When Smart Tabs next loads and reads a `pinned.json` without that entry, it forgets the unpin, so adding the entry back pins it again. A missing `pinned.json` forgets nothing: Home Manager deletes the file when `pinnedTabs` is empty, and it can be briefly absent during activation.
 
 Gotchas:
 
@@ -54,7 +54,7 @@ Gotchas:
 
 ### Provider contract
 
-A provider is an ordinary mod, for example `mods/my-board/main.js` with `{ "place": "none" }` in `mod.json`, plus an optional one-color `mods/my-board/icon.svg` for its pinned tab. It renders its view in the tab's pane and reads its own state from `shared`, `localStorage`, or files. Every space has its own copy, so keep data that must be identical across spaces in `shared` state. Only the copy in the shown tab receives `<mod>.<command>` key commands.
+A provider is an ordinary mod, for example `mods/my-board/main.js` with `{ "place": "none" }` in `mod.json`, plus an optional one-color `mods/my-board/icon.svg` for its pinned tab. The icon must be a regular file, not a symlink: Herdr App draws nothing for a symlinked SVG, and Home Manager installs files as symlinks. A provider installed that way can write the icon itself when it loads, as herdr-hermes-shepherd does. It renders its view in the tab's pane and reads its own state from `shared`, `localStorage`, or files. Every space has its own copy, so keep data that must be identical across spaces in `shared` state. Only the copy in the shown tab receives `<mod>.<command>` key commands.
 
 A provider adds buttons to the top-right of the tab bar, before Files and Changes, by publishing a list under the shared key `tab-controls:<mod>`:
 
@@ -65,7 +65,7 @@ setShared("tab-controls:my-board", [
 ]);
 ```
 
-Smart Tabs shows these controls while the shown tab contains a pane of that mod, whether the tab is pinned or not. A click runs `run(command, args ?? {})`, so `my-board.cron` reaches the shown copy's `nextCommand()` as `cron`. `label` and `command` are required; an entry without them is skipped. `icon` is an optional tinted SVG path, and `active: true` draws the selected style. Publish the list again to change it, for example when a control's `active` state changes.
+Smart Tabs shows these controls while the shown tab contains a pane of that mod, whether the tab is pinned or not. A click runs `run(command, args ?? {})`, so `my-board.cron` reaches the shown copy's `nextCommand()` as `cron`. `label` and `command` are required; an entry without them is skipped. `id` keeps a control's identity across updates; without one, its position in the list does. `icon` is an optional tinted SVG path, and `active: true` draws the selected style. Publish the list again to change it, for example when a control's `active` state changes.
 
 ## Agent Picker
 
