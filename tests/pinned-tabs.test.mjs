@@ -7,7 +7,7 @@ import assert from "node:assert/strict";
 const stubs = {
   "gpui-kit": "export class View {} export const div = () => {}, svg = () => {}, image = () => {};",
   "gpui-base": "export const h_flex = () => {}, v_flex = () => {};",
-  herdr: "export const spaces = () => [], panes = () => [], terminals = () => [], run = () => {}, openOverlay = () => {}, closeOverlay = () => {}, props = () => null, keys = () => [], theme = () => {}, window = () => {}, shared = () => {}, setShared = () => {}, layout = () => {}, settings = () => {}, machines = () => [], appHome = () => '', readTextFile = async () => null, notify = () => {};",
+  herdr: "export const spaces = () => [], panes = () => [], terminals = () => [], run = () => {}, openOverlay = () => {}, closeOverlay = () => {}, props = () => null, keys = () => [], theme = () => {}, window = () => {}, shared = () => {}, setShared = () => {}, layout = () => {}, settings = () => {}, machines = () => [], appHome = () => '', readTextFile = async () => null, exec = async () => ({ code: 1 }), notify = () => {};",
 };
 registerHooks({
   resolve: (specifier, context, next) =>
@@ -140,14 +140,24 @@ test("an unnamed mod tab without a pane title is pinned under its mod name", () 
 
 test("a missing provider icon is checked again later; a found one is kept", () => {
   const icons = new Map(), pin = "mods/workspace-chrome/pin.svg";
-  assert.deepEqual(iconLookup(icons, "board", 0), { path: pin, check: true });
+  assert.deepEqual(iconLookup(icons, "board", 0), { path: pin, full: false, check: true });
   // While the read is pending, renders ask nothing.
-  assert.deepEqual(iconLookup(icons, "board", 10), { path: pin, check: false });
+  assert.deepEqual(iconLookup(icons, "board", 10), { path: pin, full: false, check: false });
   icons.set("board", { found: false, at: 100 });
-  assert.deepEqual(iconLookup(icons, "board", 1000), { path: pin, check: false });
-  assert.deepEqual(iconLookup(icons, "board", 2100), { path: pin, check: true });
-  icons.set("board", { found: true, at: 2200 });
-  assert.deepEqual(iconLookup(icons, "board", 99999), { path: "mods/board/icon.svg", check: false });
+  assert.deepEqual(iconLookup(icons, "board", 1000), { path: pin, full: false, check: false });
+  assert.deepEqual(iconLookup(icons, "board", 2100), { path: pin, full: false, check: true });
+  icons.set("board", { found: "tab", at: 2200 });
+  assert.deepEqual(iconLookup(icons, "board", 99999), { path: "mods/board/tab-icon.svg", full: true, check: false });
+});
+
+test("a tinted icon is drawn meanwhile, and a full-colour tab icon written later replaces it", () => {
+  const icons = new Map([["board", { found: "icon", at: 0 }]]), tinted = { path: "mods/board/icon.svg", full: false };
+  assert.deepEqual(iconLookup(icons, "board", 1000), { ...tinted, check: false });
+  assert.deepEqual(iconLookup(icons, "board", 2000), { ...tinted, check: true });
+  // The pending check keeps the tinted icon, not the pin glyph.
+  assert.deepEqual(iconLookup(icons, "board", 2010), { ...tinted, check: false });
+  icons.set("board", { found: "tab", at: 2100 });
+  assert.deepEqual(iconLookup(icons, "board", 9999), { path: "mods/board/tab-icon.svg", full: true, check: false });
 });
 
 const zoomed = { id: "p", name: "Shepherd", named: true, zoomed: true, status: "working" };

@@ -1,6 +1,6 @@
 import { View, div, svg, image } from "gpui-kit";
 import { h_flex, v_flex } from "gpui-base";
-import { spaces, panes, terminals, run, openOverlay, closeOverlay, props, keys, theme, window, shared, setShared, layout, settings, machines, appHome, readTextFile, notify } from "herdr";
+import { spaces, panes, terminals, run, openOverlay, closeOverlay, props, keys, theme, window, shared, setShared, layout, settings, machines, appHome, readTextFile, exec, notify } from "herdr";
 
 const PINS = "tabs-enriched.pins";
 
@@ -54,15 +54,19 @@ export default class Tabs extends View {
     }
   }
 
-  // A provider's own `icon.svg`, else Herdr's pin glyph: mod panes carry no program icon.
-  modIcon(mod, cx) {
-    const { path, check } = iconLookup(this.icons, mod, Date.now());
+  // A provider's full-colour `tab-icon.svg`, else its tinted `icon.svg`, else Herdr's pin glyph: mod panes carry no program icon.
+  modIcon(mod, color, cx) {
+    const { path, full, check } = iconLookup(this.icons, mod, Date.now());
     if (check) cx.spawn(async (cx) => {
-      const found = await readTextFile(`${appHome()}/mods/${mod}/icon.svg`).catch(() => null) !== null;
+      const dir = `${appHome()}/mods/${mod}`, read = (name) => readTextFile(`${dir}/${name}`).catch(() => null);
+      // image() draws nothing for a symlink and remembers a missing file until the App restarts, so only a regular file that was read counts.
+      const tab = await read("tab-icon.svg") !== null && (await exec("test", ["!", "-L", `${dir}/tab-icon.svg`]).catch(() => null))?.code === 0;
+      const found = tab ? "tab" : await read("icon.svg") !== null ? "icon" : false;
+      const before = this.icons.get(mod)?.found;
       this.icons.set(mod, { found, at: Date.now() });
-      if (found) cx.notify();
+      if (found !== before) cx.notify();
     });
-    return path;
+    return full ? image(path).size(14) : svg(path).size(14).text_color(color);
   }
 
   choose(i, cx) {
@@ -165,7 +169,7 @@ export default class Tabs extends View {
           else run("tab.select", { id: c.id });
         })
         .on_mouse_down("right", (_e, cx) => { cx.stop_propagation(); openOverlay({ mod: "tabs-enriched", kind: "popup", width: 200, props: { items: tabMenu(c, space, pin, modPane), declared: this.pinned } }); })
-        .when(pin || Boolean(face.icon?.mod), el => el.child(div().id(`icon-${c.id}`).when(pin, d => d.tooltip(face.tooltip)).child(svg(this.modIcon(face.icon.mod, cx)).size(14).text_color(c.active ? t.foreground : t.muted))))
+        .when(pin || Boolean(face.icon?.mod), el => el.child(div().id(`icon-${c.id}`).when(pin, d => d.tooltip(face.tooltip)).child(this.modIcon(face.icon.mod, c.active ? t.foreground : t.muted, cx))))
         .when(Boolean(face.icon?.program), el => el.child(face.icon.program.tint ? svg(face.icon.program.icon).size(14).text_color(t.muted) : image(face.icon.program.icon).size(14)))
         .when(face.text !== null, el => el.child(div().max_w(480).truncate().tooltip(face.tooltip).child(face.text)))
         .when(face.status && c.status === "working", el => el.child(svg("mods/workspace-chrome/spinner.svg").size(12).flex_none().text_color(t.working).spin(900)))
@@ -267,14 +271,15 @@ export function loadPinned(text, pins) {
   return { declared, pins: text === null ? pins : prunePins(declared, pins) };
 }
 
-// A found icon is kept; a miss is checked again after ICON_RETRY ms, since a provider may write its icon after Smart Tabs loads.
+// A found `tab-icon.svg` (found: "tab", drawn in full colour) is kept. A tinted `icon.svg` (found: "icon") or a miss
+// is checked again after ICON_RETRY ms, since a provider may write either file after Smart Tabs loads.
 const ICON_RETRY = 2000;
 export function iconLookup(icons, mod, now) {
-  const state = icons.get(mod);
-  if (state?.found) return { path: `mods/${mod}/icon.svg`, check: false };
-  const check = !state?.pending && now >= (state?.at ?? -Infinity) + ICON_RETRY;
-  if (check) icons.set(mod, { pending: true, at: now });
-  return { path: "mods/workspace-chrome/pin.svg", check };
+  const state = icons.get(mod), full = state?.found === "tab";
+  const path = full ? `mods/${mod}/tab-icon.svg` : state?.found === "icon" ? `mods/${mod}/icon.svg` : "mods/workspace-chrome/pin.svg";
+  const check = !full && !state?.pending && now >= (state?.at ?? -Infinity) + ICON_RETRY;
+  if (check) icons.set(mod, { ...state, pending: true, at: now });
+  return { path, full, check };
 }
 
 // What a tab draws. A pinned tab is only its provider icon, named in the tooltip, without

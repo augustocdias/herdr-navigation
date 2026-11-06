@@ -34,7 +34,7 @@ The module writes the list to `mods/tabs-enriched/pinned.json` as `[{ "label": "
 
 When a space is shown without one of its pinned tabs, Smart Tabs runs `tab.new { space, name: label, mod }`, then selects the tab you were on again. Pinned tabs stay first, in configured order, and they are real tabs: Ctrl+number, the picker, and tab state work as they do for any tab. A pinned tab shows only an icon, with no text: no title, zoom marker or status. Its name appears only in the tooltip, and it has no close button. A divider separates pinned tabs from ordinary tabs. Smart Tabs does not change other tabs, their names, or any layout.
 
-Herdr gives mod panes no program icon, so the icon is the provider's own `mods/<mod>/icon.svg`, drawn tinted. An ordinary tab holding a mod pane shows the same icon before its title, unless the tab already shows a program icon. Without that file, Smart Tabs draws Herdr's pin glyph and looks for the file again every 2 seconds while tabs render, so an icon written after Smart Tabs loads still appears.
+Herdr gives mod panes no program icon, so the icon comes from the provider. Smart Tabs draws `mods/<mod>/tab-icon.svg` in full colour when it exists, else `mods/<mod>/icon.svg` tinted to the tab's text colour, else Herdr's pin glyph. An ordinary tab holding a mod pane shows the same icon before its title, unless the tab already shows a program icon. Until it finds `tab-icon.svg`, Smart Tabs looks for both files again every 2 seconds while tabs render, so an icon written after Smart Tabs loads still appears.
 
 ### Pin and Unpin
 
@@ -54,7 +54,7 @@ Gotchas:
 
 ### Provider contract
 
-A provider is an ordinary mod, for example `mods/my-board/main.js` with `{ "place": "none" }` in `mod.json`, plus an optional one-color `mods/my-board/icon.svg` for its pinned tab. The icon must be a regular file, not a symlink: Herdr App draws nothing for a symlinked SVG, and Home Manager installs files as symlinks. A provider installed that way can write the icon itself when it loads, as herdr-hermes-shepherd does. It renders its view in the tab's pane and reads its own state from `shared`, `localStorage`, or files. Every space has its own copy, so keep data that must be identical across spaces in `shared` state. Only the copy in the shown tab receives `<mod>.<command>` key commands.
+A provider is an ordinary mod, for example `mods/my-board/main.js` with `{ "place": "none" }` in `mod.json`, plus an optional icon for its tab: a one-color `mods/my-board/icon.svg`, drawn with `svg()` in the tab's text colour, or a full-colour `mods/my-board/tab-icon.svg`, drawn with `image()`. `tab-icon.svg` wins when both exist. `svg()` turns any SVG into a one-color silhouette, so a picture (for example a PNG wrapped in an SVG) belongs in `tab-icon.svg`. Either icon must be a regular file, not a symlink: Herdr App draws nothing for a symlinked SVG, and Home Manager installs files as symlinks. Smart Tabs ignores a symlinked `tab-icon.svg`. A provider installed that way can write the icon itself when it loads, as herdr-hermes-shepherd does. It renders its view in the tab's pane and reads its own state from `shared`, `localStorage`, or files. Every space has its own copy, so keep data that must be identical across spaces in `shared` state. Only the copy in the shown tab receives `<mod>.<command>` key commands.
 
 A provider adds buttons to the top-right of the tab bar, before Files and Changes, by publishing a list under the shared key `tab-controls:<mod>`:
 
