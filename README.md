@@ -1,6 +1,6 @@
 # Herdr Navigation
 
-Mods for Herdr App: Smart Tabs, Agent Picker, and Space Shortcuts. They use the App's mod API and require no Rust patches or changes to herdr-core.
+Mods for Herdr App: Smart Tabs, Agent Picker, Agent Cards, and Space Shortcuts. They use the App's mod API and require no Rust patches or changes to herdr-core.
 
 ![Smart Tabs and Agent Picker](navigation/preview.png)
 
@@ -83,6 +83,20 @@ The filter chips are clickable. A tab matches if any of its agents has the selec
 
 Arrow keys select a row, Enter opens it, Escape closes the picker, and Ctrl+D closes the selected tab. New-tab and new-space actions remain available, including when no agent matches.
 
+## Agent Cards
+
+`agents-enriched` replaces Herdr's agents list in the sidebar. Each agent is a card with its harness icon, session title, status, and time since its state changed. Below the title, a blocked agent shows why it needs you, wrapped to as many lines as it takes. The reason is the agent's own blocked report message, else its kind (permission, question, sign-in), else "Needs attention". A message longer than 240 characters is cut with an ellipsis. Other agents show their active task when the `nix.activity` integration reports one, with the checklist count, for example `2/5 · Writing tests`.
+
+The chevron on a card shows or hides its details: task, model, workspace and folder, branch, and sub-agents. Cards start collapsed. A card stays as you left it while its agent is listed, and a status change never opens or closes it. Sub-agents are of two kinds. Core child terminals are listed with their status, and a click peeks at that terminal. Sub-agents the agent only reports are listed as text, because they have no terminal to open. A collapsed card with child terminals shows their count, coloured by the most urgent child, so a child that needs you marks its parent.
+
+Click a card to focus its terminal. Clicking the chevron only toggles details. Permission prompts stay in the terminal; cards have no approve or deny buttons. Hovering a card shows a tooltip with its title, reason or task, model and branch. All of it is also on the card or in its details.
+
+The list takes the keyboard when you click the space between cards, or through a key bound to `agents-enriched:focus` in `keys.json`. Up and Down move between cards and the child terminals of expanded cards. Enter focuses a card's terminal or peeks at a child, Space shows or hides a card's details, and Right and Left show and hide them. A key bound to `agents-enriched:details` shows or hides the details of the card under the keyboard, else of the agent on screen. The repository's `keys.json` fragment binds neither.
+
+The sort button keeps Herdr's two views: Priority, with Needs you, Done, Working and Idle sections, and Grouped by space. Ordering, Done becoming Idle once viewed, and the order `agent.next` and `agent.prev` follow are Herdr's. Herdr's agents list let you pin agents to the top; Agent Cards has no agent pins and ignores pins Herdr saved. Tab pinning in Smart Tabs is unrelated and unchanged. The narrow sidebar rail shows Herdr's numbered rows.
+
+Without the integration, or when its label has expired, belongs to another program or is malformed, cards use Herdr's native data: the agent's report title, then the tab name, then the program name. Model then reads "Not reported" and Task "None reported".
+
 ## Space Shortcuts
 
 `spaces-enriched` is Herdr's spaces sidebar with two buttons before the local `+`. When another machine is known, the buttons sit on the This computer row; otherwise they sit in the Spaces header. The narrow sidebar rail hides them. They work only on this computer.
@@ -105,7 +119,7 @@ The module installs only the mods. It does not replace your keys, settings, layo
 
 Merge `inputs.herdr-navigation.lib.keys` into your existing Nix-managed key object with `lib.recursiveUpdate`. The fragment opens the picker with Alt+W and suppresses Herdr's default Ctrl+1–5 navigation only inside the picker, allowing those keys to reach its state filters. Preserve the rest of your key configuration.
 
-In your chosen layout, replace the tabs block's mod identifier `tabs` with `tabs-enriched`, and the spaces block's `spaces` with `spaces-enriched`. Keep both changes declarative and rebuild your system or Home Manager configuration to apply them.
+In your chosen layout, replace the tabs block's mod identifier `tabs` with `tabs-enriched`, the spaces block's `spaces` with `spaces-enriched`, and the agents block's `agents` with `agents-enriched`. Keep these changes declarative and rebuild your system or Home Manager configuration to apply them.
 
 The optional `navigation/layouts/navigation.json` provides a complete layout based on Herdr's main layout. To install it through Home Manager:
 
@@ -120,7 +134,7 @@ Select the Navigation layout after activation if you installed it. Each mod ship
 
 Development checks used Herdr App 0.1.11 and Core 0.1.16 on Linux in a private display and Core session. The mod loader checks and live picker interactions ran through Nix-store file symlinks. No Windows or macOS runtime checks have been performed.
 
-The preview uses synthetic agent reports, not private sessions. `node --test` checks the Space Shortcuts naming, worktree lookup, and direnv rules, and how Smart Tabs reads pinned tabs, combines configured and menu pins, builds the tab menu, and decides which tabs to open or move. Before updating the mods, run `herdr-app check` on each mod folder and exercise the visible App behavior in an isolated session. Keep the title helper in both self-contained modules consistent.
+The preview uses synthetic agent reports, not private sessions. `node --test` checks the Space Shortcuts naming, worktree lookup, and direnv rules, and how Smart Tabs reads pinned tabs, combines configured and menu pins, builds the tab menu, and decides which tabs to open or move. It also checks what Agent Cards shows from native and `nix.activity` data, its attention reasons, its order and sections without agent pins, and which expanded cards it keeps. Before updating the mods, run `herdr-app check` on each mod folder and exercise the visible App behavior in an isolated session. Keep the title helper in both self-contained modules consistent.
 
 Herdr's community catalog discovers public GitHub repositories with the `herdr-layout` topic. The `navigation/` folder contains the layout, mods, recipe, and preview required by the catalog. Publishing the repository and setting the topic are separate from installing it locally.
 

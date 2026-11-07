@@ -38,6 +38,8 @@ in {
       "herdr-app/mods/spaces-enriched/mod.json".source = ./navigation/mods/spaces-enriched/mod.json;
       "herdr-app/mods/space-open/main.js".source = ./navigation/mods/space-open/main.js;
       "herdr-app/mods/space-open/mod.json".source = ./navigation/mods/space-open/mod.json;
+      "herdr-app/mods/agents-enriched/main.js".source = ./navigation/mods/agents-enriched/main.js;
+      "herdr-app/mods/agents-enriched/mod.json".source = ./navigation/mods/agents-enriched/mod.json;
     }
     // lib.optionalAttrs (cfg.pinnedTabs != []) {
       "herdr-app/mods/tabs-enriched/pinned.json".text = builtins.toJSON cfg.pinnedTabs;
