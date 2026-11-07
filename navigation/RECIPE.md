@@ -18,7 +18,7 @@ Prefer a live optional integration title, then the native agent report title, th
 
 ## Agent Picker
 
-Merge the repository's `keys.json` fragment into the existing key configuration. It binds Alt+W to `mod.open:picker-enriched` and disables the global Ctrl+1–5 actions inside that mod so its own filter handler receives them. Show the same tab labels and allow text search across the full, untruncated label.
+Merge the repository's `keys.json` fragment into the existing key configuration. It binds Alt+W to `mod.open:picker-enriched`, Alt+A to `agents-enriched.focus`, and disables the global Ctrl+1–5 actions inside that mod so its own filter handler receives them. Show the same tab labels and allow text search across the full, untruncated label.
 
 Provide clickable All, Working, Needs you, Done, and Idle chips. Ctrl+1 through Ctrl+5 select them while the search input remains focused. Reset row selection and scroll position after a filter change. Combine state and text predicates. Match any agent in a tab rather than only its aggregate state; shell-only tabs do not match agent-state filters.
 
@@ -30,7 +30,7 @@ Show each agent as a card with its harness icon, session title and status. Under
 
 A chevron button toggles details: task, model, workspace, branch, Core child terminals and reported sub-agents. Cards start collapsed, keep the person's choice while the agent is listed, and never open or close on a status change. A card click focuses the terminal; the chevron only toggles. Peek only at child terminals Core lists; reported sub-agents are text. Keep permission prompts in terminals.
 
-Keep Herdr's Priority and Grouped by space views, its ordering and Done/Idle semantics, and `agent.next`/`agent.prev` order. Drop agent pins. Hover tooltips repeat what the card and its details show. Up, Down, Enter, Space, Right and Left operate the focused list, including group headers, and the list scrolls to keep the selection visible. The sort button and its menu work from the keyboard. Fall back to native data when the integration's label is missing, expired, malformed or from another program.
+Keep Herdr's Priority and Grouped by space views, its ordering and Done/Idle semantics, and `agent.next`/`agent.prev` order. Drop agent pins. Hover tooltips repeat what the card and its details show. Up, Down, Enter, Space, Right and Left operate the focused list, including group headers, and the list keeps the selection visible as rows change. Page Up, Page Down, Home and End scroll the list, so oversized reasons read to the end. The sort button, its menu, the narrow rail and its expand control work from the keyboard; Escape returns to the terminal. Fall back to native data when the integration's label is missing, expired, malformed or from another program.
 
 ## Space Shortcuts
 

@@ -91,9 +91,11 @@ The chevron on a card shows or hides its details: task, model, workspace and fol
 
 Click a card to focus its terminal. Clicking the chevron only toggles details. Permission prompts stay in the terminal; cards have no approve or deny buttons. Hovering a card shows a tooltip with its title, reason or task, model and branch. All of it is also on the card or in its details.
 
-The list takes the keyboard when you click the space between cards, or through a key bound to `agents-enriched.focus`, for example `"global": { "f8": "agents-enriched.focus" }` in `keys.json`. Up and Down move between group headers, cards, and the child terminals of expanded cards, and the list scrolls to keep the selection in view. On a header, Enter or Space folds or unfolds the group; Left folds it and Right unfolds it. On a card, Enter focuses its terminal, Space shows or hides its details, and Right and Left show and hide them. On a child, Enter peeks at it. A key bound to `agents-enriched.details` shows or hides the details of the card under the keyboard, or of the card a selected child belongs to, else of the agent on screen. The scroll thumb can be dragged, and the wheel scrolls the list. The repository's `keys.json` fragment binds neither.
+Alt+A, from the repository's `keys.json` fragment, gives the list the keyboard; Tab stays in the terminal. Clicking the space between cards does the same, and Escape goes back to the agent on screen. Up and Down move between group headers, cards, and the child terminals of expanded cards. The list keeps the selection in view, also when cards above it grow or new rows appear, until you scroll with the wheel, the thumb or the page keys. Page Up, Page Down, Home and End scroll the list, so a reason taller than the list can be read to its end. On a header, Enter or Space folds or unfolds the group; Left folds it and Right unfolds it. On a card, Enter focuses its terminal, Space shows or hides its details, and Right and Left show and hide them. On a child, Enter peeks at it. A key bound to `agents-enriched.details` shows or hides the details of the card under the keyboard, or of the card a selected child belongs to, else of the agent on screen. The fragment doesn't bind `agents-enriched.details`. The scroll thumb can be dragged, and the wheel scrolls the list.
 
 The sort button is the first stop in that order, above the first header. Enter or Space on it opens the sort menu, where Up and Down choose a view, Enter or Space selects it and Escape closes the menu.
+
+In the narrow rail, Alt+A works the same way: Up and Down move between the numbered agents and the » control below them, Enter focuses an agent's terminal, and Enter on » widens the sidebar back to cards.
 
 The sort button keeps Herdr's two views: Priority, with Needs you, Done, Working and Idle sections, and Grouped by space. Ordering, Done becoming Idle once viewed, and the order `agent.next` and `agent.prev` follow are Herdr's. Herdr's agents list let you pin agents to the top; Agent Cards has no agent pins and ignores pins Herdr saved. Tab pinning in Smart Tabs is unrelated and unchanged. The narrow sidebar rail shows Herdr's numbered rows.
 
@@ -119,7 +121,7 @@ imports = [inputs.herdr-navigation.homeManagerModules.default];
 
 The module installs only the mods. It does not replace your keys, settings, layouts, or runtime state.
 
-Merge `inputs.herdr-navigation.lib.keys` into your existing Nix-managed key object with `lib.recursiveUpdate`. The fragment opens the picker with Alt+W and suppresses Herdr's default Ctrl+1–5 navigation only inside the picker, allowing those keys to reach its state filters. Preserve the rest of your key configuration.
+Merge `inputs.herdr-navigation.lib.keys` into your existing Nix-managed key object with `lib.recursiveUpdate`. The fragment opens the picker with Alt+W, gives the agents list the keyboard with Alt+A, and suppresses Herdr's default Ctrl+1–5 navigation only inside the picker, allowing those keys to reach its state filters. Preserve the rest of your key configuration.
 
 In your chosen layout, replace the tabs block's mod identifier `tabs` with `tabs-enriched`, the spaces block's `spaces` with `spaces-enriched`, and the agents block's `agents` with `agents-enriched`. Keep these changes declarative and rebuild your system or Home Manager configuration to apply them.
 

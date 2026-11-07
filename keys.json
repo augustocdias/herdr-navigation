@@ -1,6 +1,7 @@
 {
   "global": {
-    "alt-w": "mod.open:picker-enriched"
+    "alt-w": "mod.open:picker-enriched",
+    "alt-a": "agents-enriched.focus"
   },
   "mod:picker-enriched": {
     "ctrl-1": "terminal",

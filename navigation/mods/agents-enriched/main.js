@@ -202,19 +202,38 @@ export function rowsOf(order) {
   const rows = [];
   for (const o of order) {
     if (o.parent) rows.at(-1)?.kids.push(o.key);
-    else if (!o.sort) rows.push({ key: o.key, kids: [] });
+    else if (!o.key.startsWith("#")) rows.push({ key: o.key, kids: [] });
   }
   return rows;
 }
 
-// One frame's scroll offset. `reveal` asks to show the cursor once; it stays set only
-// while the cursor's row awaits its first measurement. The sort button sits above the list.
-export function scrollStep({ scroll, reveal: wanted, cursor, spans, view, total }) {
+// One frame's scroll offset. While `follow` is on (a selection key was pressed; the wheel,
+// the thumb and the page keys turn it off) and the list has the keyboard, every frame keeps
+// the selection in view, so rows that grow, move or appear above it can't push it out.
+// Keys starting with "#" are controls outside the rows: the sort button above, the rail's
+// expand control below.
+export function scrollStep({ scroll, follow, cursor, spans, view, total, keyboard }) {
   let next = scroll;
-  if (wanted && cursor === "#sort") { next = 0; wanted = false; }
-  else if (wanted && !spans.has(cursor)) wanted = false;
-  else if (wanted && spans.get(cursor)[1]) { next = reveal(scroll, view, spans.get(cursor)); wanted = false; }
-  return { scroll: Math.max(0, Math.min(next, Math.max(0, total - view))), reveal: wanted };
+  if (follow && keyboard) {
+    if (cursor === "#sort") next = 0;
+    else if (String(cursor).startsWith("#")) { /* below the rows: nothing to show */ }
+    else if (!spans.has(cursor)) follow = false;
+    else if (spans.get(cursor)[1]) next = reveal(scroll, view, spans.get(cursor));
+  }
+  return { scroll: Math.max(0, Math.min(next, Math.max(0, total - view))), follow };
+}
+
+// Page Up/Down move by a page less 40px of overlap, Home/End go to either end; null for
+// other keys. They read what is in the list, a reason taller than it included.
+export function pageScroll(key, scroll, view, total) {
+  const max = Math.max(0, total - view), page = Math.max(view - 40, 20);
+  const to = { pagedown: scroll + page, pageup: scroll - page, home: 0, end: max }[key];
+  return to === undefined ? null : Math.max(0, Math.min(max, to));
+}
+
+// The narrow rail's keyboard order: its numbered agents, then the control back to cards.
+export function railOrder(list) {
+  return [...list.map((a) => ({ key: a.address, agent: a })), { key: "#expand", expand: true }];
 }
 
 // The scroll thumb's place, or null when the list fits; at least 16px tall.
@@ -267,7 +286,7 @@ export default class Agents extends View {
     this.sizes = new Map(); // row key -> measured height (see rowSpans)
     this.scroll = 0;
     this.view = 0;
-    this.reveal = false; // the keyboard moved: show the cursor on the next frame
+    this.follow = false; // keep the keyboard selection in view (see scrollStep)
     this.drag = null; // { y, scroll } while the scroll thumb is dragged
     // Each agent's last state and when it changed (ms), kept across restarts.
     this.changed = JSON.parse(localStorage.getItem("changed") ?? "{}");
@@ -284,7 +303,7 @@ export default class Agents extends View {
           // On a child row, its card; on a header or the sort button, the agent on screen.
           const under = this.keys.is_focused() ? String(this.cursor).split(">")[0] : null;
           const a = list.find((k) => k.address === under) || list.find((k) => k.focused);
-          if (a) { this.cursor = a.address; this.toggle(a.address); this.reveal = true; }
+          if (a) { this.cursor = a.address; this.toggle(a.address); this.follow = true; }
         }
         cx.notify();
       }
@@ -478,11 +497,11 @@ export default class Agents extends View {
     setAgentOrder(list.map((a) => a.address));
     const groups = sections(list, rankOf, byPriority);
     // The sort button comes first: Tab doesn't reach it, Up from the first header does.
-    const order = collapsed ? [] : [{ key: "#sort", sort: true }, ...keyOrder(groups, this.folded, this.expanded, (a) => children(all, a.address))];
+    const order = collapsed ? railOrder(list) : [{ key: "#sort", sort: true }, ...keyOrder(groups, this.folded, this.expanded, (a) => children(all, a.address))];
     if (!order.some((o) => o.key === this.cursor)) {
       // Its row went (folded, ended): start over at the first card, without a jump.
       this.cursor = order.find((o) => o.agent)?.key ?? order[0]?.key ?? null;
-      this.reveal = false;
+      this.follow = false;
     }
     const keyboard = this.keys.is_focused();
     const rowList = rowsOf(order);
@@ -492,7 +511,7 @@ export default class Agents extends View {
     for (const k of this.sizes.keys()) if (!live.has(k)) this.sizes.delete(k);
     const total = this.sizes.get("#list") ?? 0;
     const maxScroll = Math.max(0, total - this.view);
-    ({ scroll: this.scroll, reveal: this.reveal } = scrollStep({ scroll: this.scroll, reveal: this.reveal, cursor: this.cursor, spans, view: this.view, total }));
+    ({ scroll: this.scroll, follow: this.follow } = scrollStep({ scroll: this.scroll, follow: this.follow, cursor: this.cursor, spans, view: this.view, total, keyboard }));
     const bar = collapsed ? null : thumb(this.view, total, this.scroll);
 
     const tabs = spaces().flatMap(s => s.tabs);
@@ -504,13 +523,20 @@ export default class Agents extends View {
     // The rail: a number and a status per agent, as in Herdr's list.
     const railRow = (a, i) => h_flex()
       .id(`ag-${a.address}`)
+      .on_size_change(this.measure(a.address))
       .h(26)
       .px(8)
       .flex_none()
       .items_center()
       .gap(4)
+      .when(keyboard && this.cursor === a.address, (el) => el.bg(t.selected))
       .hover((s) => s.bg(t.hover))
-      .on_click(() => run("pane.focus", { pane: a.pane }))
+      .role("list_box_option")
+      .aria_selected(this.cursor === a.address)
+      .when(keyboard && this.cursor === a.address, (el) => el.aria_active_descendant())
+      .accessibility_label(`${i + 1}, ${label(a) || a.program?.name || a.address}, ${STATUS_WORD[a.status] ?? a.status}. Enter opens its terminal.`)
+      .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
+      .on_click((_e, cx) => { this.cursor = a.address; run("pane.focus", { pane: a.pane }); cx.notify(); })
       .child(div().flex_1().min_w(0).whitespace_nowrap().text_right().text_color(t.muted).child(String(i + 1)))
       .child(h_flex().w(14).flex_none().items_center().justify_center().child(this.status(t, a, true)));
 
@@ -596,10 +622,30 @@ export default class Agents extends View {
     const onKey = (e, cx) => {
       const i = order.findIndex((o) => o.key === this.cursor);
       const it = order[i];
+      const page = pageScroll(e.key, this.scroll, this.view, total);
+      if (page !== null) {
+        // Reading by the page is deliberate scrolling, like the wheel: it stops following.
+        this.scroll = page;
+        this.follow = false;
+        cx.stop_propagation();
+        return cx.notify();
+      }
+      if (e.key === "escape") {
+        // Back to the agent on screen, as the keyboard came from it.
+        const back = list.find((a) => a.focused);
+        if (!back) return; // nothing to return to: Herdr handles Escape
+        run("pane.focus", { pane: back.pane });
+        return cx.stop_propagation();
+      }
       if (e.key === "down" || e.key === "up") {
         const next = order[Math.min(order.length - 1, Math.max(0, i + (e.key === "down" ? 1 : -1)))];
         this.cursor = next?.key ?? null;
       } else if (!it) return;
+      else if (it.expand) {
+        if (e.key !== "enter" && e.key !== "space") return;
+        toggleSidebar();
+      }
+      else if (collapsed && e.key !== "enter") return;
       else if (it.sort) {
         if (e.key !== "enter" && e.key !== "space") return;
         openSort();
@@ -615,7 +661,7 @@ export default class Agents extends View {
       else if (e.key === "space") this.toggle(it.agent.address);
       else if (e.key === "right" || e.key === "left") this.toggle(it.agent.address, e.key === "right");
       else return;
-      this.reveal = true;
+      this.follow = true;
       cx.stop_propagation();
       cx.notify();
     };
@@ -702,32 +748,33 @@ export default class Agents extends View {
       .when(list.length === 0 && !collapsed, (el) =>
         el.child(div().px(12).text_size(12).text_color(t.dim).child("No agent status yet. Agents show up here when they report their status. Older versions and agents inside tmux may not.")),
       )
-      .when(collapsed, (el) => el.child(v_flex().id("ag-rail").flex_1().min_h(0).overflow_y_scrollbar().mode("always").children(rows)))
-      .when(!collapsed, (el) => el.child(div().id("ag-list").flex_1().min_h(0).relative().overflow_hidden()
+      // The cards and the rail share one self-scrolling list, so both keep the selection in view.
+      .child(div().id("ag-list").flex_1().min_h(0).relative().overflow_hidden()
         .track_focus(this.keys).tab_index(0).role("list_box").accessibility_label("Agents").on_key_down(onKey)
         // A press between cards gives the list the keyboard; cards and headers stop their own presses.
         .on_mouse_down("left", () => this.keys.focus())
         .on_size_change((size, cx) => { if (this.view !== size.height) { this.view = size.height; cx.notify(); } })
         .on_scroll_wheel((e, cx) => {
           this.scroll = Math.max(0, Math.min(this.scroll - e.delta.y, maxScroll));
-          this.reveal = false;
+          this.follow = false;
           cx.notify();
         })
         // Dragging the thumb; it ends on release, or when the pointer leaves the list.
         .on_mouse_move((e, cx) => {
           if (!this.drag) return;
           this.scroll = dragScroll(this.drag, e.position.y, this.view, total);
+          this.follow = false;
           cx.notify();
         })
         .on_mouse_up("left", () => { this.drag = null; })
         .on_hover((on) => { if (!on) this.drag = null; })
-        .child(v_flex().id("ag-rows").absolute().left(0).right(0).top(-this.scroll).px(8).pb(8)
+        .child(v_flex().id("ag-rows").absolute().left(0).right(0).top(-this.scroll).px(collapsed ? 0 : 8).pb(collapsed ? 0 : 8)
           .on_size_change(this.measure("#list"))
           .children(rows))
         .when(Boolean(bar), (el) => el.child(div().id("ag-thumb").absolute().right(1).w(6).rounded(3).bg(t.dim + "66")
           .top(bar.top).h(bar.h)
           .hover((s) => s.bg(t.dim))
-          .on_mouse_down("left", (e, cx) => { cx.stop_propagation(); this.drag = { y: e.position.y, scroll: this.scroll }; })))))
+          .on_mouse_down("left", (e, cx) => { cx.stop_propagation(); this.drag = { y: e.position.y, scroll: this.scroll }; }))))
       .when(collapsed, (el) =>
         el.child(
           h_flex()
@@ -737,8 +784,13 @@ export default class Agents extends View {
             .child(
               div()
                 .id("collapse")
+                .px(6)
+                .rounded(4)
                 .text_size(13)
                 .text_color(t.dim)
+                .role("button")
+                .accessibility_label("Show the full sidebar")
+                .when(keyboard && this.cursor === "#expand", (el) => el.bg(t.selected).text_color(t.foreground))
                 .hover((s) => s.text_color(t.foreground))
                 .on_click(toggleSidebar)
                 .child("»"),

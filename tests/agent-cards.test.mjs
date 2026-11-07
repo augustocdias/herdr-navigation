@@ -13,7 +13,7 @@ registerHooks({
   resolve: (specifier, context, next) =>
     specifier in stubs ? { url: `data:text/javascript,${encodeURIComponent(stubs[specifier])}`, shortCircuit: true } : next(specifier, context),
 });
-const { activity, parseTodo, attentionReason, cardFacts, arrange, sections, keepPresent, children, keyOrder, childAlerts, rowSpans, reveal, CARD_INSET, scrollStep, thumb, dragScroll, rowsOf } = await import("../navigation/mods/agents-enriched/main.js");
+const { activity, parseTodo, attentionReason, cardFacts, arrange, sections, keepPresent, children, keyOrder, childAlerts, rowSpans, reveal, CARD_INSET, scrollStep, thumb, dragScroll, rowsOf, pageScroll, railOrder } = await import("../navigation/mods/agents-enriched/main.js");
 
 const NOW = 1_000_000;
 const tokens = { agent: "claude-opus", title: "Fix login", todo: "2/5 Writing tests", sub1: "Explore: find callers", sub2: "", sub3: "", submore: "" };
@@ -181,18 +181,57 @@ test("only live Core child terminals are navigable sub-agents", () => {
   assert.deepEqual(children(all, "t1").map((k) => [k.t.address, k.lines]), [["t2", ["├"]], ["t3", ["│", "└"]], ["t5", ["└"]]]);
 });
 
-test("a keyboard move is revealed once, then the wheel is free", () => {
+test("the keyboard selection stays in view while the list changes under it", () => {
+  const step = (o) => scrollStep({ view: 300, total: 900, keyboard: true, ...o });
+  // An expanded child selected at 200..230, in view.
+  let spans = new Map([["a>k1", [200, 30]]]);
+  assert.deepEqual(step({ scroll: 0, follow: true, cursor: "a>k1", spans }), { scroll: 0, follow: true });
+  // Another blocked child lengthens the parent's reason: the child moves to 420..450.
+  // Following persists across frames, so the next frame brings it back.
+  spans = new Map([["a>k1", [420, 30]]]);
+  assert.deepEqual(step({ scroll: 0, follow: true, cursor: "a>k1", spans }), { scroll: 150, follow: true });
+  // After the wheel (follow off), changes leave the offset alone.
+  assert.deepEqual(step({ scroll: 0, follow: false, cursor: "a>k1", spans }), { scroll: 0, follow: false });
+  // Without the keyboard on the list there is no visible selection to follow.
+  assert.deepEqual(step({ scroll: 0, follow: true, cursor: "a>k1", spans, keyboard: false }), { scroll: 0, follow: true });
+});
+
+test("selection outside the list rows does not fight the scroll", () => {
   const spans = new Map([["a", [400, 60]], ["b", [0, 0]]]);
-  // Revealed: the flag clears, so the next frame keeps whatever the wheel does.
-  assert.deepEqual(scrollStep({ scroll: 0, reveal: true, cursor: "a", spans, view: 300, total: 900 }), { scroll: 160, reveal: false });
-  // The sort button sits above the list: show the top, and clear the flag.
-  assert.deepEqual(scrollStep({ scroll: 250, reveal: true, cursor: "#sort", spans, view: 300, total: 900 }), { scroll: 0, reveal: false });
-  assert.deepEqual(scrollStep({ scroll: 250, reveal: false, cursor: "#sort", spans, view: 300, total: 900 }), { scroll: 250, reveal: false });
-  // Not measured yet: wait for the height. Not a row at all: drop the request.
-  assert.deepEqual(scrollStep({ scroll: 20, reveal: true, cursor: "b", spans, view: 300, total: 900 }), { scroll: 20, reveal: true });
-  assert.deepEqual(scrollStep({ scroll: 20, reveal: true, cursor: "gone", spans, view: 300, total: 900 }), { scroll: 20, reveal: false });
+  const step = (o) => scrollStep({ view: 300, total: 900, keyboard: true, follow: true, spans, ...o });
+  // The sort button sits above the list: show the top.
+  assert.deepEqual(step({ scroll: 250, cursor: "#sort" }), { scroll: 0, follow: true });
+  // The rail's expand control sits below it: leave the offset.
+  assert.deepEqual(step({ scroll: 250, cursor: "#expand" }), { scroll: 250, follow: true });
+  // Not measured yet: wait. Not a row at all: stop following.
+  assert.deepEqual(step({ scroll: 20, cursor: "b" }), { scroll: 20, follow: true });
+  assert.deepEqual(step({ scroll: 20, cursor: "gone" }), { scroll: 20, follow: false });
   // Always inside the list: a list that shrank pulls the offset back.
-  assert.deepEqual(scrollStep({ scroll: 800, reveal: false, cursor: null, spans, view: 300, total: 500 }), { scroll: 200, reveal: false });
+  assert.deepEqual(scrollStep({ scroll: 800, follow: false, cursor: null, spans, view: 300, total: 500, keyboard: true }), { scroll: 200, follow: false });
+});
+
+test("Page Up, Page Down, Home and End scroll through content taller than the list", () => {
+  // A 1000px reason in a 300px list: Page Down steps keep 40px of overlap and reach the end.
+  assert.equal(pageScroll("pagedown", 0, 300, 1000), 260);
+  assert.equal(pageScroll("pagedown", 600, 300, 1000), 700);
+  assert.equal(pageScroll("pageup", 260, 300, 1000), 0);
+  assert.equal(pageScroll("end", 0, 300, 1000), 700);
+  assert.equal(pageScroll("home", 500, 300, 1000), 0);
+  assert.equal(pageScroll("down", 500, 300, 1000), null);
+});
+
+test("the rail keeps a keyboard order: its agents, then the way back to cards", () => {
+  const a = agent("a", "idle"), b = agent("b", "blocked");
+  assert.deepEqual(railOrder([b, a]).map((o) => o.key), ["b", "a", "#expand"]);
+  assert.equal(railOrder([b, a])[0].agent, b);
+  assert.deepEqual(railOrder([]), [{ key: "#expand", expand: true }]);
+});
+
+test("the shipped keys fragment gives the agents list a keyboard entry", async () => {
+  const { readFile } = await import("node:fs/promises");
+  const keys = JSON.parse(await readFile(new URL("../keys.json", import.meta.url), "utf8"));
+  assert.equal(keys.global["alt-a"], "agents-enriched.focus");
+  assert.equal(keys.global["alt-w"], "mod.open:picker-enriched");
 });
 
 test("the scroll thumb stays inside the list and drags in proportion", () => {
@@ -210,4 +249,6 @@ test("the scroll thumb stays inside the list and drags in proportion", () => {
 test("rows and their child keys come from the keyboard order", () => {
   const order = [{ key: "#sort", sort: true }, { key: "sec-4", group: {} }, { key: "a", agent: {} }, { key: "a>k1", parent: "a" }, { key: "b", agent: {} }];
   assert.deepEqual(rowsOf(order), [{ key: "sec-4", kids: [] }, { key: "a", kids: ["a>k1"] }, { key: "b", kids: [] }]);
+  // The rail's expand control sits below the rows, like the sort button above them.
+  assert.deepEqual(rowsOf([{ key: "a", agent: {} }, { key: "#expand", expand: true }]), [{ key: "a", kids: [] }]);
 });
