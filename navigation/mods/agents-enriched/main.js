@@ -94,18 +94,26 @@ export function parseTodo(todo) {
   return m ? { done: Number(m[1]), total: Number(m[2]), task: m[3] ?? "" } : null;
 }
 
-// Why a blocked agent needs you: its 7501 report's own message or kind while that report
-// is the blocked one, else "Needs attention". Other states have no reason.
+// Why a blocked agent needs you: its 7501 report's own message, whole, or kind while that
+// report is the blocked one, else "Needs attention". Other states have no reason.
 const KIND = { permission: "Waiting for permission", question: "Has a question", auth: "Needs sign-in" };
-const REASON_MAX = 240;
 export function attentionReason(status, report) {
   if (status !== "blocked") return null;
   if (report?.state === "blocked") {
-    const msg = Array.from(oneLine(report.msg));
-    if (msg.length) return msg.length > REASON_MAX ? `${msg.slice(0, REASON_MAX - 1).join("")}…` : msg.join("");
+    const msg = oneLine(report.msg);
+    if (msg) return msg;
     if (KIND[report.kind]) return KIND[report.kind];
   }
   return "Needs attention";
+}
+
+const childName = (k) => k.name || k.template || k.program?.name || k.address;
+
+// Core children that need you, each with its reason: these lift the parent into Needs you,
+// so the parent's card says why. `listed`: agents() statuses, which win as in kidStatus.
+export function childAlerts(subs, listed) {
+  return subs.filter((s) => kidStatus(s.t, listed) === "blocked")
+    .map((s) => ({ address: s.t.address, name: childName(s.t), reason: attentionReason("blocked", s.t.report) }));
 }
 
 // What a card shows, from native data and, while it is valid, the `nix.activity` label.
@@ -156,13 +164,78 @@ export function keepPresent(expanded, addresses) {
   return new Set([...expanded].filter((a) => !heard.has(machineOf(a)) || listed.has(a)));
 }
 
-// What Up and Down walk: cards in unfolded groups, each expanded card followed by its
-// Core child rows. `kidsOf(agent)`: children() of that agent.
+// What Up and Down walk: every group header (Enter folds or unfolds it), the cards of
+// unfolded groups, and each expanded card's Core child rows. `kidsOf(agent)`: its children().
 export function keyOrder(groups, folded, expanded, kidsOf) {
-  return groups.filter((g) => !folded.has(g.id)).flatMap((g) => g.members).flatMap((a) => [
+  return groups.flatMap((g) => [{ key: g.id, group: g }, ...(folded.has(g.id) ? [] : g.members.flatMap((a) => [
     { key: a.address, agent: a },
     ...(expanded.has(a.address) ? kidsOf(a).map((s) => ({ key: `${a.address}>${s.t.address}`, terminal: s.t.address, parent: a.address })) : []),
-  ]);
+  ]))]);
+}
+
+// The list scrolls itself (GPUI gives a script no way to scroll an ordinary element into
+// view), so it needs each row's place. A row's measured height includes its spacing; a
+// card's child rows sit CARD_INSET plus its head block below the card's top.
+const CARD_GAP = 3, CARD_BORDER = 1, CARD_PAD = 7;
+export const CARD_INSET = CARD_GAP + CARD_BORDER + CARD_PAD;
+export function rowSpans(rows, sizes) {
+  const spans = new Map();
+  let y = 0;
+  for (const r of rows) {
+    const h = sizes.get(r.key) ?? 0;
+    spans.set(r.key, [y, h]);
+    let ky = y + CARD_INSET + (sizes.get(`${r.key}#head`) ?? 0);
+    for (const k of r.kids ?? []) {
+      const kh = sizes.get(k) ?? 0;
+      spans.set(k, [ky, kh]);
+      ky += kh;
+    }
+    y += h;
+  }
+  return spans;
+}
+
+// The scroll offset that shows `span` ([top, height]) in a `view`-tall list, moving as
+// little as possible; a row taller than the view shows its top.
+// rowSpans input from keyOrder: headers and cards, each card with its child row keys.
+export function rowsOf(order) {
+  const rows = [];
+  for (const o of order) {
+    if (o.parent) rows.at(-1)?.kids.push(o.key);
+    else if (!o.sort) rows.push({ key: o.key, kids: [] });
+  }
+  return rows;
+}
+
+// One frame's scroll offset. `reveal` asks to show the cursor once; it stays set only
+// while the cursor's row awaits its first measurement. The sort button sits above the list.
+export function scrollStep({ scroll, reveal: wanted, cursor, spans, view, total }) {
+  let next = scroll;
+  if (wanted && cursor === "#sort") { next = 0; wanted = false; }
+  else if (wanted && !spans.has(cursor)) wanted = false;
+  else if (wanted && spans.get(cursor)[1]) { next = reveal(scroll, view, spans.get(cursor)); wanted = false; }
+  return { scroll: Math.max(0, Math.min(next, Math.max(0, total - view))), reveal: wanted };
+}
+
+// The scroll thumb's place, or null when the list fits; at least 16px tall.
+export function thumb(view, total, scroll) {
+  if (total <= view) return null;
+  const h = Math.max(16, (view * view) / total);
+  return { top: ((view - h) * scroll) / (total - view), h };
+}
+
+// The offset while dragging the thumb from `start` ({ y, scroll }) to pointer `y`.
+export function dragScroll(start, y, view, total) {
+  const max = Math.max(0, total - view), t = thumb(view, total, start.scroll);
+  if (!t) return 0;
+  return Math.max(0, Math.min(max, start.scroll + ((y - start.y) * max) / (view - t.h)));
+}
+
+export function reveal(scroll, view, span) {
+  if (!span || !view) return scroll;
+  const [top, h] = span;
+  if (top < scroll || h > view) return top;
+  return top + h > scroll + view ? top + h - view : scroll;
 }
 
 // Live Core child terminals of `addr`, depth first, each with the tree lines in front of it.
@@ -180,15 +253,26 @@ export function children(all, addr, lines = []) {
 
 export default class Agents extends View {
   init(_props, cx) {
-    if (props()?.sortMenu) return;
+    // The sort menu is this mod opened as a popup: it takes the keyboard (Up/Down, Enter, Escape).
+    if (props()?.sortMenu) {
+      this.at = Math.max(0, SORTS.indexOf(sortOf()));
+      this.handle = cx.focus_handle();
+      this.handle.focus();
+      return;
+    }
     this.folded = new Set();
     this.expanded = new Set();
     this.cursor = null;
     this.keys = cx.focus_handle();
+    this.sizes = new Map(); // row key -> measured height (see rowSpans)
+    this.scroll = 0;
+    this.view = 0;
+    this.reveal = false; // the keyboard moved: show the cursor on the next frame
+    this.drag = null; // { y, scroll } while the scroll thumb is dragged
     // Each agent's last state and when it changed (ms), kept across restarts.
     this.changed = JSON.parse(localStorage.getItem("changed") ?? "{}");
     cx.timer.every(30000, (cx) => cx.notify());
-    // Key commands (keys.json: "<key>": "agents-enriched:focus", see nextCommand in herdr.d.ts):
+    // Key commands (keys.json: "<key>": "agents-enriched.focus"):
     // `focus` gives the list the keyboard; `details` shows or hides details of the card under
     // the keyboard, else of the shown agent.
     cx.spawn(async (cx) => {
@@ -197,8 +281,10 @@ export default class Agents extends View {
         if (command === "focus") this.keys.focus();
         else if (command === "details") {
           const list = agents();
-          const a = (this.keys.is_focused() && list.find((k) => k.address === this.cursor)) || list.find((k) => k.focused);
-          if (a) { this.cursor = a.address; this.toggle(a.address); }
+          // On a child row, its card; on a header or the sort button, the agent on screen.
+          const under = this.keys.is_focused() ? String(this.cursor).split(">")[0] : null;
+          const a = list.find((k) => k.address === under) || list.find((k) => k.focused);
+          if (a) { this.cursor = a.address; this.toggle(a.address); this.reveal = true; }
         }
         cx.notify();
       }
@@ -240,6 +326,15 @@ export default class Agents extends View {
     return sawDone ? RANK.done : RANK[a.status] ?? 0;
   }
 
+  // Records a row's height for rowSpans; a change redraws so the scroll can follow it.
+  measure(key) {
+    return (size, cx) => {
+      if (this.sizes.get(key) === size.height) return;
+      this.sizes.set(key, size.height);
+      cx.notify();
+    };
+  }
+
   // Only the disclosure button and the keyboard change what is expanded; status never does.
   toggle(address, open = !this.expanded.has(address)) {
     if (open) this.expanded.add(address);
@@ -248,13 +343,28 @@ export default class Agents extends View {
 
   sortMenu(t) {
     const on = sortOf().id;
+    const choose = (s) => {
+      setShared("agents.sort", s.id);
+      closeOverlay(props().overlay);
+    };
     return v_flex()
+      .id("sort-menu")
+      .track_focus(this.handle)
+      .role("menu")
+      .accessibility_label("Sort agents")
       .w_full()
       .p(5)
       .bg(t.popover)
       .text_size(12.8)
+      .on_key_down((e, cx) => {
+        if (e.key === "down" || e.key === "up") this.at = (this.at + (e.key === "down" ? 1 : SORTS.length - 1)) % SORTS.length;
+        else if (e.key === "enter" || e.key === "space") return choose(SORTS[this.at]);
+        else if (e.key === "escape") return closeOverlay(props().overlay);
+        else return;
+        cx.notify();
+      })
       .child(div().px(8).pt(4).pb(6).text_size(11).text_color(t.dim).child("Sort agents"))
-      .children(SORTS.map((s) => h_flex()
+      .children(SORTS.map((s, i) => h_flex()
         .id(`sort-${s.id}`)
         .h(31)
         .px(8)
@@ -262,45 +372,52 @@ export default class Agents extends View {
         .rounded(7)
         .items_center()
         .text_color(t.foreground)
+        .role("menu_item")
+        .aria_selected(i === this.at)
+        .accessibility_label(`${s.label}${s.id === on ? ", current" : ""}`)
+        .when(i === this.at, (el) => el.bg(t.selected))
         .hover((el) => el.bg(t.hover))
-        .on_click(() => {
-          setShared("agents.sort", s.id);
-          closeOverlay(props().overlay);
-        })
+        .on_click(() => choose(s))
         .child(svg(`mods/workspace-chrome/${s.icon}.svg`).size(14).flex_none().text_color(t.muted))
         .child(div().flex_1().child(s.label))
         .when(s.id === on, (el) => el.child(svg("mods/workspace-chrome/check.svg").size(14).flex_none().text_color(t.foreground)))));
   }
 
-  // A Core child terminal inside an expanded card; a click peeks at it.
-  subRow(t, s, shown, current) {
+  // A Core child terminal inside an expanded card; a click peeks at it. A blocked child
+  // shows its reason under its name.
+  subRow(t, s, parent, shown, current) {
     const k = s.t;
+    const key = `${parent}>${k.address}`;
     const st = kidStatus(k, this.listed);
     const pic = icon(k.program, 13, t.foreground);
     const on = k.address === shown;
-    const name = k.name || k.template || k.program?.name || k.address;
-    return h_flex()
-      .id(`sub-${k.address}`)
+    const name = childName(k);
+    const reason = st === "blocked" ? attentionReason("blocked", k.report) : null;
+    return v_flex()
+      .id(`sub-${key}`)
+      .on_size_change(this.measure(key))
       .pr(4)
+      .pb(reason ? 4 : 0)
       .rounded(6)
-      .h(24)
       .flex_none()
-      .items_center()
       .text_size(12)
       .cursor_pointer()
       .role("button")
-      .accessibility_label(`Peek at sub-agent ${name}, ${STATUS_WORD[st] ?? st}`)
+      .accessibility_label(`Peek at sub-agent ${name}, ${STATUS_WORD[st] ?? st}${reason ? `, ${reason}` : ""}`)
       .border(1)
       .border_color(current ? t.accent : t.dim + "00")
       .when(on, (el) => el.bg(t.selected))
       .hover((s) => s.bg(t.hover))
+      .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
       .on_click((_e, cx) => { cx.stop_propagation(); run("terminal.peek", { terminal: k.address }); })
-      .children(s.lines.map(l => div().self_start().mt(-4).w(9).h(16).mr(4).flex_none()
-        .when(Boolean(l), el => el.border_l(1.5).border_color(t.input))
-        .when(l === "└" || l === "├", el => el.border_b(1.5).rounded_bl(6))))
-      .when(Boolean(pic), el => el.child(div().mr(6).child(pic)))
-      .child(div().flex_1().min_w(0).truncate().text_color(on ? t.foreground : t.muted).child(name))
-      .child(this.status(t, { status: st }, true));
+      .child(h_flex().h(24).items_center()
+        .children(s.lines.map(l => div().self_start().mt(-4).w(9).h(16).mr(4).flex_none()
+          .when(Boolean(l), el => el.border_l(1.5).border_color(t.input))
+          .when(l === "└" || l === "├", el => el.border_b(1.5).rounded_bl(6))))
+        .when(Boolean(pic), el => el.child(div().mr(6).child(pic)))
+        .child(div().flex_1().min_w(0).truncate().text_color(on ? t.foreground : t.muted).child(name))
+        .child(this.status(t, { status: st }, true)))
+      .when(Boolean(reason), el => el.child(div().pl(13 * s.lines.length + (pic ? 19 : 0)).text_size(11.5).whitespace_normal().text_color(t.blocked).child(reason)));
   }
 
   // compact: a ! for blocked where a header already says "Needs you".
@@ -321,7 +438,7 @@ export default class Agents extends View {
       .child(div().flex_1().min_w(0).whitespace_normal().text_color(t.foreground).child(value));
   }
 
-  details(t, a, f, subs, shown, current) {
+  details(t, a, f, subs) {
     const id = (k) => `${k}-${a.address}`;
     const progress = f.progress ? `${f.progress.done} of ${f.progress.total} done` : null;
     const workspace = [f.workspace, f.folder].filter(Boolean).join(" · ");
@@ -332,12 +449,11 @@ export default class Agents extends View {
       .child(this.fact(t, id("model"), "Model", f.model ?? "Not reported"))
       .when(Boolean(workspace), el => el.child(this.fact(t, id("workspace"), "Workspace", workspace)))
       .child(this.fact(t, id("branch"), "Branch", f.branch ?? "No branch"))
-      .when(subs.length > 0, el => el.child(v_flex().id(id("subs")).gap(1)
-        .child(div().text_size(11.5).text_color(t.dim).child("Sub-agents"))
-        .children(subs.map(s => this.subRow(t, s, shown, current === `${a.address}>${s.t.address}`)))))
       .when(f.reported.length > 0, el => el.child(v_flex().id(id("reported")).gap(2)
         .child(div().text_size(11.5).text_color(t.dim).child("Reported by the agent"))
-        .children(f.reported.map((text, i) => div().id(id(`reported-${i}`)).pl(8).text_size(11.5).whitespace_normal().text_color(t.muted).child(text)))));
+        .children(f.reported.map((text, i) => div().id(id(`reported-${i}`)).pl(8).text_size(11.5).whitespace_normal().text_color(t.muted).child(text)))))
+      // The child rows follow the details inside the card (see card).
+      .when(subs.length > 0, el => el.child(div().id(id("subs")).text_size(11.5).text_color(t.dim).child("Sub-agents")));
   }
 
   render(cx) {
@@ -361,9 +477,23 @@ export default class Agents extends View {
     list = arrange(list, rankOf, (a) => this.since(a), byPriority);
     setAgentOrder(list.map((a) => a.address));
     const groups = sections(list, rankOf, byPriority);
-    const order = collapsed ? [] : keyOrder(groups, this.folded, this.expanded, (a) => children(all, a.address));
-    if (!order.some((o) => o.key === this.cursor)) this.cursor = order[0]?.key ?? null;
+    // The sort button comes first: Tab doesn't reach it, Up from the first header does.
+    const order = collapsed ? [] : [{ key: "#sort", sort: true }, ...keyOrder(groups, this.folded, this.expanded, (a) => children(all, a.address))];
+    if (!order.some((o) => o.key === this.cursor)) {
+      // Its row went (folded, ended): start over at the first card, without a jump.
+      this.cursor = order.find((o) => o.agent)?.key ?? order[0]?.key ?? null;
+      this.reveal = false;
+    }
     const keyboard = this.keys.is_focused();
+    const rowList = rowsOf(order);
+    const spans = rowSpans(rowList, this.sizes);
+    // Heights of rows that are gone would only pile up, and mislead a row that comes back.
+    const live = new Set(["#list", ...rowList.flatMap((r) => [r.key, `${r.key}#head`, ...r.kids])]);
+    for (const k of this.sizes.keys()) if (!live.has(k)) this.sizes.delete(k);
+    const total = this.sizes.get("#list") ?? 0;
+    const maxScroll = Math.max(0, total - this.view);
+    ({ scroll: this.scroll, reveal: this.reveal } = scrollStep({ scroll: this.scroll, reveal: this.reveal, cursor: this.cursor, spans, view: this.view, total }));
+    const bar = collapsed ? null : thumb(this.view, total, this.scroll);
 
     const tabs = spaces().flatMap(s => s.tabs);
     const label = (a) => {
@@ -411,18 +541,20 @@ export default class Agents extends View {
       const machine = a.address.includes("/") ? a.address.split("/")[0] : null;
       // Without a space header above (priority), the card names its space.
       const where = byPriority ? a.space_name : null;
-      const line = f.attention ?? (f.task || f.progress ? [f.progress && `${f.progress.done}/${f.progress.total}`, f.task].filter(Boolean).join(" · ") : null);
-      const quick = [f.title, line, f.model, f.branch && `Branch ${f.branch}`].filter(Boolean).join("\n");
+      const alerts = childAlerts(subs, this.listed).map((x) => `${x.name}: ${x.reason}`);
+      const task = f.task || f.progress ? [f.progress && `${f.progress.done}/${f.progress.total}`, f.task].filter(Boolean).join(" · ") : null;
+      const attention = [f.attention, ...alerts].filter(Boolean);
+      const line = attention.length ? attention.join("; ") : task;
+      const quick = [f.title, ...(attention.length ? attention : [task]), f.model, f.branch && `Branch ${f.branch}`].filter(Boolean).join("\n");
       const disclose = `${open ? "Hide" : "Show"} details for ${f.title}`;
-      return v_flex()
+      const pad = pic ? 24 : 0;
+      // Spacing lives inside the measured wrapper, so heights stack (see rowSpans).
+      return div().id(`wrap-${a.address}`).py(CARD_GAP).flex_none().on_size_change(this.measure(a.address)).child(v_flex()
         .id(`ag-${a.address}`)
-        .flex_none()
-        .my(3)
         .px(10)
-        .py(7)
-        .gap(3)
+        .py(CARD_PAD)
         .rounded(9)
-        .border(1)
+        .border(CARD_BORDER)
         .border_color(current ? t.accent : a.status === "blocked" ? t.blocked + "66" : t.border)
         .bg(a.focused ? t.selected : t.raised)
         .cursor_pointer()
@@ -435,6 +567,7 @@ export default class Agents extends View {
         // A press on a card opens its terminal; it doesn't give the list the keyboard.
         .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
         .on_click(() => { this.cursor = a.address; run("pane.focus", { pane: a.pane }); })
+        .child(v_flex().id(`head-${a.address}`).gap(3).on_size_change(this.measure(`${a.address}#head`))
         .child(h_flex().gap(8).items_center()
           .when(Boolean(pic), el => el.child(pic))
           .child(h_flex().flex_1().min_w(0).gap(5).items_center()
@@ -452,9 +585,10 @@ export default class Agents extends View {
             .hover((s) => s.bg(t.input).text_color(t.foreground))
             .on_click((_e, cx) => { cx.stop_propagation(); this.cursor = a.address; this.toggle(a.address); cx.notify(); })
             .child(svg(`mods/workspace-chrome/chevron-${open ? "down" : "right"}.svg`).size(12))))
-        .when(Boolean(f.attention), el => el.child(div().id(`reason-${a.address}`).pl(pic ? 24 : 0).text_size(11.5).whitespace_normal().text_color(t.blocked).child(f.attention)))
-        .when(!f.attention && Boolean(line), el => el.child(div().id(`task-${a.address}`).pl(pic ? 24 : 0).text_size(11.5).truncate().text_color(t.muted).child(line)))
-        .when(open, el => el.child(this.details(t, a, f, subs, shown, childCursor)));
+        .children(attention.map((text, i) => div().id(`reason-${a.address}-${i}`).pl(pad).text_size(11.5).whitespace_normal().text_color(t.blocked).child(text)))
+        .when(!attention.length && Boolean(task), el => el.child(div().id(`task-${a.address}`).pl(pad).text_size(11.5).truncate().text_color(t.muted).child(task)))
+        .when(open, el => el.child(this.details(t, a, f, subs))))
+        .when(open, el => el.children(subs.map((s) => this.subRow(t, s, a.address, shown, childCursor === `${a.address}>${s.t.address}`)))));
     };
 
     // Up/Down move between cards and the child rows of expanded ones. Enter opens a card's
@@ -466,11 +600,22 @@ export default class Agents extends View {
         const next = order[Math.min(order.length - 1, Math.max(0, i + (e.key === "down" ? 1 : -1)))];
         this.cursor = next?.key ?? null;
       } else if (!it) return;
+      else if (it.sort) {
+        if (e.key !== "enter" && e.key !== "space") return;
+        openSort();
+      }
+      else if (it.group) {
+        const open = !this.folded.has(it.group.id);
+        if (e.key === "enter" || e.key === "space" || (e.key === "left" && open) || (e.key === "right" && !open)) {
+          open ? this.folded.add(it.group.id) : this.folded.delete(it.group.id);
+        } else return;
+      }
       else if (e.key === "enter") it.agent ? run("pane.focus", { pane: it.agent.pane }) : run("terminal.peek", { terminal: it.terminal });
       else if (!it.agent) return;
       else if (e.key === "space") this.toggle(it.agent.address);
       else if (e.key === "right" || e.key === "left") this.toggle(it.agent.address, e.key === "right");
       else return;
+      this.reveal = true;
       cx.stop_propagation();
       cx.notify();
     };
@@ -478,22 +623,31 @@ export default class Agents extends View {
     // A group's header; it folds the group. Folded, it says how many and the most urgent state.
     const header = (g) => {
       const open = !this.folded.has(g.id);
-      const top = g.members.reduce((m, a) => ((RANK[a.status] ?? 0) > (RANK[m] ?? 0) ? a.status : m), null);
+      // Folded, it shows its most urgent member, counting what lifts a parent (its children).
+      const top = SECTION_STATUS[Math.max(0, ...g.members.map(rankOf))] ?? null;
+      const current = keyboard && this.cursor === g.id;
       return h_flex()
         .id(g.id)
+        .on_size_change(this.measure(g.id))
         .px(4)
         .pt(8)
         .h(30)
         .flex_none()
+        .rounded(6)
+        .when(current, (el) => el.bg(t.selected))
+        .aria_selected(this.cursor === g.id)
+        .when(current, (el) => el.aria_active_descendant())
+        .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
         .gap(6)
         .items_center()
         .text_size(11)
         .font_medium()
         .cursor_pointer()
         .role("button")
-        .accessibility_label(`${open ? "Fold" : "Unfold"} ${g.label}, ${g.members.length}`)
+        .accessibility_label(`${g.label}, ${g.members.length}, ${open ? "open; Enter folds it" : "folded; Enter opens it"}`)
         .hover((s) => s.text_color(t.foreground))
         .on_click((_e, cx) => {
+          this.cursor = g.id;
           open ? this.folded.add(g.id) : this.folded.delete(g.id);
           cx.notify();
         })
@@ -504,6 +658,7 @@ export default class Agents extends View {
           .when(!byPriority && top && top !== "idle", (el) => el.child(this.status(t, { status: top }, true)))
           .child(svg("mods/workspace-chrome/chevron-right.svg").size(11).flex_none().text_color(t.dim)));
     };
+    const openSort = () => openOverlay({ mod: "agents-enriched", kind: "popup", width: 200, height: 140, props: { sortMenu: true } });
     const rows = collapsed
       ? list.map(railRow)
       : groups.flatMap((g) => [header(g), ...(this.folded.has(g.id) ? [] : g.members.map(card))]);
@@ -529,12 +684,16 @@ export default class Agents extends View {
             .child(
               div()
                 .id("ag-sort")
+                .p(2)
+                .rounded(4)
                 .text_size(11)
                 .text_color(t.dim)
                 .role("button")
                 .accessibility_label(`Sort agents: ${sort.label}`)
+                .border(1)
+                .border_color(keyboard && this.cursor === "#sort" ? t.accent : t.chrome)
                 .hover((s) => s.text_color(t.foreground))
-                .on_click(() => openOverlay({ mod: "agents-enriched", kind: "popup", width: 200, height: 140, props: { sortMenu: true } }))
+                .on_click(openSort)
                 .tooltip(`Sort agents: ${sort.label}`)
                 .child(svg(`mods/workspace-chrome/${sort.icon}.svg`).size(14)),
             ),
@@ -543,11 +702,32 @@ export default class Agents extends View {
       .when(list.length === 0 && !collapsed, (el) =>
         el.child(div().px(12).text_size(12).text_color(t.dim).child("No agent status yet. Agents show up here when they report their status. Older versions and agents inside tmux may not.")),
       )
-      .child(v_flex().id("ag-list").flex_1().min_h(0).px(collapsed ? 0 : 8).pb(collapsed ? 0 : 8).overflow_y_scrollbar().mode("always")
-        .when(!collapsed, el => el.track_focus(this.keys).tab_index(0).role("list_box").accessibility_label("Agents").on_key_down(onKey)
-          // A press between cards gives the list the keyboard; cards stop their own presses.
-          .on_mouse_down("left", () => this.keys.focus()))
-        .children(rows))
+      .when(collapsed, (el) => el.child(v_flex().id("ag-rail").flex_1().min_h(0).overflow_y_scrollbar().mode("always").children(rows)))
+      .when(!collapsed, (el) => el.child(div().id("ag-list").flex_1().min_h(0).relative().overflow_hidden()
+        .track_focus(this.keys).tab_index(0).role("list_box").accessibility_label("Agents").on_key_down(onKey)
+        // A press between cards gives the list the keyboard; cards and headers stop their own presses.
+        .on_mouse_down("left", () => this.keys.focus())
+        .on_size_change((size, cx) => { if (this.view !== size.height) { this.view = size.height; cx.notify(); } })
+        .on_scroll_wheel((e, cx) => {
+          this.scroll = Math.max(0, Math.min(this.scroll - e.delta.y, maxScroll));
+          this.reveal = false;
+          cx.notify();
+        })
+        // Dragging the thumb; it ends on release, or when the pointer leaves the list.
+        .on_mouse_move((e, cx) => {
+          if (!this.drag) return;
+          this.scroll = dragScroll(this.drag, e.position.y, this.view, total);
+          cx.notify();
+        })
+        .on_mouse_up("left", () => { this.drag = null; })
+        .on_hover((on) => { if (!on) this.drag = null; })
+        .child(v_flex().id("ag-rows").absolute().left(0).right(0).top(-this.scroll).px(8).pb(8)
+          .on_size_change(this.measure("#list"))
+          .children(rows))
+        .when(Boolean(bar), (el) => el.child(div().id("ag-thumb").absolute().right(1).w(6).rounded(3).bg(t.dim + "66")
+          .top(bar.top).h(bar.h)
+          .hover((s) => s.bg(t.dim))
+          .on_mouse_down("left", (e, cx) => { cx.stop_propagation(); this.drag = { y: e.position.y, scroll: this.scroll }; })))))
       .when(collapsed, (el) =>
         el.child(
           h_flex()

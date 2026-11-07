@@ -26,11 +26,11 @@ Preserve arrow-key navigation, Enter, Escape, Ctrl+D to close a tab, and new-tab
 
 ## Agent Cards
 
-Show each agent as a card with its harness icon, session title and status. Under the title, show a blocked agent's reason, wrapped; use its blocked report message, else its kind, else "Needs attention". Otherwise show the active task and checklist count when the optional integration reports them.
+Show each agent as a card with its harness icon, session title and status. Under the title, show a blocked agent's whole reason, wrapped; use its blocked report message, else its kind, else "Needs attention". A parent lifted into Needs you by a blocked child terminal shows that child's reason the same way. Otherwise show the active task and checklist count when the optional integration reports them.
 
 A chevron button toggles details: task, model, workspace, branch, Core child terminals and reported sub-agents. Cards start collapsed, keep the person's choice while the agent is listed, and never open or close on a status change. A card click focuses the terminal; the chevron only toggles. Peek only at child terminals Core lists; reported sub-agents are text. Keep permission prompts in terminals.
 
-Keep Herdr's Priority and Grouped by space views, its ordering and Done/Idle semantics, and `agent.next`/`agent.prev` order. Drop agent pins. Hover tooltips repeat what the card and its details show. Up, Down, Enter, Space, Right and Left operate the focused list. Fall back to native data when the integration's label is missing, expired, malformed or from another program.
+Keep Herdr's Priority and Grouped by space views, its ordering and Done/Idle semantics, and `agent.next`/`agent.prev` order. Drop agent pins. Hover tooltips repeat what the card and its details show. Up, Down, Enter, Space, Right and Left operate the focused list, including group headers, and the list scrolls to keep the selection visible. The sort button and its menu work from the keyboard. Fall back to native data when the integration's label is missing, expired, malformed or from another program.
 
 ## Space Shortcuts
 
