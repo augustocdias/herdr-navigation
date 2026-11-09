@@ -60,7 +60,7 @@ export default class Tabs extends View {
     if (check) cx.spawn(async (cx) => {
       const dir = `${appHome()}/mods/${mod}`, read = (name) => readTextFile(`${dir}/${name}`).catch(() => null);
       // image() draws nothing for a symlink and remembers a missing file until the App restarts, so only a regular file that was read counts.
-      const tab = await read("tab-icon.svg") !== null && (await exec("test", ["!", "-L", `${dir}/tab-icon.svg`]).catch(() => null))?.code === 0;
+      const tab = await read("tab-icon.svg") !== null && (await exec("sh", ["-c", 'test ! -L "$1"', "sh", `${dir}/tab-icon.svg`]).catch(() => null))?.code === 0;
       const found = tab ? "tab" : await read("icon.svg") !== null ? "icon" : false;
       const before = this.icons.get(mod)?.found;
       this.icons.set(mod, { found, at: Date.now() });

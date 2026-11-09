@@ -56,6 +56,8 @@ Gotchas:
 
 A provider is an ordinary mod, for example `mods/my-board/main.js` with `{ "place": "none" }` in `mod.json`, plus an optional icon for its tab: a one-color `mods/my-board/icon.svg`, drawn with `svg()` in the tab's text colour, or a full-colour `mods/my-board/tab-icon.svg`, drawn with `image()`. `tab-icon.svg` wins when both exist. `svg()` turns any SVG into a one-color silhouette, so a picture (for example a PNG wrapped in an SVG) belongs in `tab-icon.svg`. Either icon must be a regular file, not a symlink: Herdr App draws nothing for a symlinked SVG, and Home Manager installs files as symlinks. Smart Tabs ignores a symlinked `tab-icon.svg`. A provider installed that way can write the icon itself when it loads, as herdr-hermes-shepherd does. It renders its view in the tab's pane and reads its own state from `shared`, `localStorage`, or files. Every space has its own copy, so keep data that must be identical across spaces in `shared` state. Only the copy in the shown tab receives `<mod>.<command>` key commands.
 
+The icon file check uses the shell's `test` builtin, so an unrelated executable named `test` on PATH cannot hide a valid tab icon.
+
 A provider adds buttons to the top-right of the tab bar, before Files and Changes, by publishing a list under the shared key `tab-controls:<mod>`:
 
 ```js
