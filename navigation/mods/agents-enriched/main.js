@@ -131,10 +131,11 @@ export function parseTodo(todo) {
 
 // Why a blocked agent needs you: its 7501 report's own message, whole, or kind while that
 // report is the blocked one, else "Needs attention". Other states have no reason.
-// Core keeps one report per terminal and replaces it whole, so a resolved blocker or a new
-// session leaves no old message. Core also drops a message over 2048 UTF-8 bytes or with
-// control characters. Here a message with control characters or over 2048 code points (a
-// looser bound, so nothing Core keeps is lost) is ignored, not cut.
+// `report` is Core's last accepted report, kept until it accepts a newer one; mods get no
+// session or report id, so the reason is Core's, not proven current (README, Agent Cards).
+// Core rejects a message over 2048 UTF-8 bytes or with control characters. Here a message
+// with control characters or over 2048 code points (a looser bound, so nothing Core keeps
+// is lost) is ignored, not cut.
 const KIND = { permission: "Waiting for permission", question: "Has a question", auth: "Needs sign-in" };
 export function attentionReason(status, report) {
   if (status !== "blocked") return null;

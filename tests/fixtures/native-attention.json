@@ -1,0 +1,30 @@
+{
+  "source": "Hand-written from recordings in .dev-skills/debug/agents-panel-redesign/t_81e99c7d/followup-it2/ (private herdr-core 0.1.19, herdr-app 0.1.14, real OMP 18.18.1 and Claude Code 2.1.318). Each step is the report and status after an event. Steps where nothing changed (trust prompt open, kills, rejected reports) are the unchanged state recorded between the script's marks. Stale reports and the rejected sequence come from synthetic emitters, not a harness. omp, claude and rejected are terminals() rows seen by a probe mod; claudeTrusted is Core's hc get, from a fresh terminal with no stale report.",
+  "omp": [
+    { "event": "stale report", "status": "blocked", "report": { "app": "omp", "kind": "permission", "msg": "Old permission from the previous session", "state": "blocked" } },
+    { "event": "omp starts", "status": "idle", "report": { "app": "omp", "state": "idle" } },
+    { "event": "omp gets SIGTERM", "status": "idle", "report": { "app": "omp", "state": "idle" } },
+    { "event": "stale report", "status": "blocked", "report": { "app": "omp", "kind": "permission", "msg": "Old permission from the previous session", "state": "blocked" } },
+    { "event": "omp starts", "status": "idle", "report": { "app": "omp", "state": "idle" } },
+    { "event": "omp gets SIGKILL", "status": "idle", "report": { "app": "omp", "state": "idle" } }
+  ],
+  "claude": [
+    { "event": "stale report", "status": "blocked", "report": { "app": "claude-code", "kind": "permission", "msg": "Old permission from the previous session", "state": "blocked" } },
+    { "event": "claude starts, trust prompt open", "status": "blocked", "report": { "app": "claude-code", "kind": "permission", "msg": "Old permission from the previous session", "state": "blocked" } },
+    { "event": "claude gets SIGTERM", "status": null, "report": null },
+    { "event": "stale report", "status": "blocked", "report": { "app": "claude-code", "kind": "permission", "msg": "Old permission from the previous session", "state": "blocked" } },
+    { "event": "claude starts, trust prompt open", "status": "blocked", "report": { "app": "claude-code", "kind": "permission", "msg": "Old permission from the previous session", "state": "blocked" } },
+    { "event": "claude gets SIGKILL", "status": "blocked", "report": { "app": "claude-code", "kind": "permission", "msg": "Old permission from the previous session", "state": "blocked" } }
+  ],
+  "claudeTrusted": [
+    { "event": "claude starts, trust prompt open", "status": null, "report": null },
+    { "event": "trust accepted", "status": "idle", "report": { "app": "claude-code", "state": "idle" } }
+  ],
+  "rejected": [
+    { "event": "blocked with a message", "status": "blocked", "report": { "app": "omp", "kind": "permission", "msg": "Old permission", "state": "blocked" } },
+    { "event": "blocked question with a newline: Core rejects it", "status": "blocked", "report": { "app": "omp", "kind": "permission", "msg": "Old permission", "state": "blocked" } },
+    { "event": "blocked question of 2049 bytes: Core rejects it", "status": "blocked", "report": { "app": "omp", "kind": "permission", "msg": "Old permission", "state": "blocked" } },
+    { "event": "bare blocked", "status": "blocked", "report": { "app": "claude-code", "state": "blocked" } },
+    { "event": "working", "status": "working", "report": { "app": "claude-code", "state": "working" } }
+  ]
+}

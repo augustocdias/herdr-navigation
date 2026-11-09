@@ -3,6 +3,7 @@
 import { registerHooks } from "node:module";
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 
 const stubs = {
   "gpui-kit": "export class View {} export const div = () => {}, svg = () => {}, image = () => {};",
@@ -54,7 +55,6 @@ test("token limits count code points, so astral text up to 80 is kept and longer
 });
 
 test("Smart Tabs and the Agent Picker read the label with the same activity() as the cards", async () => {
-  const { readFile } = await import("node:fs/promises");
   const body = async (mod) => /function activity\([\s\S]*?\n\}\n/.exec(await readFile(new URL(`../navigation/mods/${mod}/main.js`, import.meta.url), "utf8"))[0];
   const cards = await body("agents-enriched");
   assert.equal(await body("tabs-enriched"), cards);
@@ -108,18 +108,37 @@ test("a malformed or oversized message is ignored, never shown in part", () => {
   assert.equal(attentionReason("blocked", "blocked"), "Needs attention");
 });
 
-test("a resolved blocker or a new session leaves no old reason behind", () => {
-  // Core replaces the whole report each time, so these are the reports the card sees in turn.
-  const reports = [omp("permission", "Allow bash: rm -rf build"), { app: "omp", state: "working" }, { app: "omp", state: "blocked" }];
-  assert.deepEqual(reports.map((r) => attentionReason(r.state, r)), ["Allow bash: rm -rf build", null, "Needs attention"]);
+// Native transitions from a private Core and App: real OMP and Claude starts and exits after a
+// synthetic stale report, and a synthetic emitter for rejected reports (see the fixture's source).
+const native = JSON.parse(await readFile(new URL("./fixtures/native-attention.json", import.meta.url), "utf8"));
+const replay = (steps) => steps.map((s) => [s.event, attentionReason(s.status, s.report)]);
+const OLD = "Old permission from the previous session";
+
+test("a reason clears once Core accepts a newer report", () => {
+  assert.deepEqual(replay(native.omp), [
+    ["stale report", OLD], ["omp starts", null], ["omp gets SIGTERM", null],
+    ["stale report", OLD], ["omp starts", null], ["omp gets SIGKILL", null],
+  ]);
+  // Claude sends its first report (idle) only after its trust prompt; a fresh terminal here.
+  assert.deepEqual(replay(native.claudeTrusted), [["claude starts, trust prompt open", null], ["trust accepted", null]]);
+  // A resolved blocker (synthetic emitter): the next accepted report, bare blocked or working, drops the message.
+  assert.deepEqual(replay(native.rejected).slice(3), [["bare blocked", "Needs attention"], ["working", null]]);
   // agents() already moved on while the terminal still holds the blocked report: no reason.
-  assert.equal(attentionReason("working", reports[0]), null);
-  assert.equal(attentionReason("idle", reports[0]), null);
-  assert.equal(attentionReason("done", reports[0]), null);
-  // A new session's first report replaces the old one's message, also when another harness
-  // now runs in the terminal: only the current report counts.
-  const next = [omp("question", undefined), { app: "claude-code", state: "blocked", kind: "auth" }];
-  assert.deepEqual(next.map((r) => attentionReason("blocked", r)), ["Has a question", "Needs sign-in"]);
+  for (const status of ["working", "idle", "done"]) assert.equal(attentionReason(status, native.omp[0].report), null);
+});
+
+// Known limit, not a guarantee: Core keeps its last accepted report, blocked state included,
+// until a new one is accepted, and gives mods no session, report id or reporter to tell.
+test("without a new accepted report, Core's last blocked reason stays", () => {
+  assert.deepEqual(replay(native.claude), [
+    ["stale report", OLD], ["claude starts, trust prompt open", OLD], ["claude gets SIGTERM", null],
+    ["stale report", OLD], ["claude starts, trust prompt open", OLD], ["claude gets SIGKILL", OLD],
+  ]);
+  assert.deepEqual(replay(native.rejected).slice(0, 3), [
+    ["blocked with a message", "Old permission"],
+    ["blocked question with a newline: Core rejects it", "Old permission"],
+    ["blocked question of 2049 bytes: Core rejects it", "Old permission"],
+  ]);
 });
 
 test("a reason never comes from the activity label, its tasks or its freshness", () => {
@@ -324,7 +343,6 @@ test("the rail keeps a keyboard order: its agents, then the way back to cards", 
 });
 
 test("the shipped keys fragment gives the agents list a keyboard entry", async () => {
-  const { readFile } = await import("node:fs/promises");
   const keys = JSON.parse(await readFile(new URL("../keys.json", import.meta.url), "utf8"));
   assert.equal(keys.global["alt-a"], "agents-enriched.focus");
   assert.equal(keys.global["alt-w"], "mod.open:picker-enriched");
