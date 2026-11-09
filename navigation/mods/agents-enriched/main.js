@@ -81,7 +81,7 @@ export function activity(terminal, now = Date.now()) {
     if (data?.version !== 1 || !Number.isFinite(data.expires) || data.expires <= now) return null;
     if (terminal.program?.key !== data.agent) return null;
     const tokens = data.tokens;
-    if (!tokens || ["agent", "title", "todo", "sub1", "sub2", "sub3", "submore"].some(k => typeof tokens[k] !== "string" || tokens[k].length > 80)) return null;
+    if (!tokens || ["agent", "title", "todo", "sub1", "sub2", "sub3", "submore"].some(k => typeof tokens[k] !== "string" || [...tokens[k]].length > 80)) return null;
     return tokens;
   } catch {
     return null;
@@ -194,12 +194,26 @@ export function taskLine(f) {
   return f.task || f.progress ? [f.progress && `${f.progress.done}/${f.progress.total}`, f.task].filter(Boolean).join(" · ") : null;
 }
 
+// The App's tooltip never wraps, so a long line is cut into rows of at most `max` code
+// points, at the last space past the row's middle, else mid-word (paths have no spaces).
+export function wrapLine(s, max = 64) {
+  const rows = [];
+  let rest = [...s];
+  while (rest.length > max) {
+    const space = rest.lastIndexOf(" ", max);
+    const at = space > max / 2 ? space : max;
+    rows.push(rest.slice(0, at).join(""));
+    rest = rest.slice(at === space ? at + 1 : at);
+  }
+  return [...rows, rest.join("")].join("\n");
+}
+
 // A card's tooltip: a preview of its details, all of which the card and its details also show.
 export function hoverText(f, attention) {
   const subs = f.reportedTotal ? `${f.reportedTotal} reported sub-agent${f.reportedTotal === 1 ? "" : "s"}, no terminal`
     : f.reported.length ? "Reported sub-agents, no terminal" : null;
   return [f.title, ...(attention.length ? attention : [taskLine(f)]), f.model && `Model ${f.model}`,
-    f.branch && `Branch ${f.branch}`, f.folder && `Folder ${f.folder}`, subs].filter(Boolean).join("\n");
+    f.branch && `Branch ${f.branch}`, f.folder && `Folder ${f.folder}`, subs].filter(Boolean).flatMap((l) => l.split("\n")).map((l) => wrapLine(l)).join("\n");
 }
 
 // Priority order, or agents() order when grouped by space. Agent pins are gone: any

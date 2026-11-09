@@ -285,7 +285,7 @@ function activity(terminal, now = Date.now()) {
     if (data?.version !== 1 || !Number.isFinite(data.expires) || data.expires <= now) return null;
     if (terminal.program?.key !== data.agent) return null;
     const tokens = data.tokens;
-    if (!tokens || ["agent", "title", "todo", "sub1", "sub2", "sub3", "submore"].some(k => typeof tokens[k] !== "string" || tokens[k].length > 80)) return null;
+    if (!tokens || ["agent", "title", "todo", "sub1", "sub2", "sub3", "submore"].some(k => typeof tokens[k] !== "string" || [...tokens[k]].length > 80)) return null;
     return tokens;
   } catch {
     return null;

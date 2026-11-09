@@ -13,7 +13,7 @@ registerHooks({
   resolve: (specifier, context, next) =>
     specifier in stubs ? { url: `data:text/javascript,${encodeURIComponent(stubs[specifier])}`, shortCircuit: true } : next(specifier, context),
 });
-const { activity, activityDetails, taskLine, hoverText, parseTodo, attentionReason, cardFacts, arrange, sections, keepPresent, children, keyOrder, childAlerts, rowSpans, reveal, CARD_INSET, scrollStep, thumb, dragScroll, rowsOf, pageScroll, railOrder } = await import("../navigation/mods/agents-enriched/main.js");
+const { activity, activityDetails, taskLine, hoverText, wrapLine, parseTodo, attentionReason, cardFacts, arrange, sections, keepPresent, children, keyOrder, childAlerts, rowSpans, reveal, CARD_INSET, scrollStep, thumb, dragScroll, rowsOf, pageScroll, railOrder } = await import("../navigation/mods/agents-enriched/main.js");
 
 const NOW = 1_000_000;
 const tokens = { agent: "claude-opus", title: "Fix login", todo: "2/5 Writing tests", sub1: "Explore: find callers", sub2: "", sub3: "", submore: "" };
@@ -43,6 +43,22 @@ test("expired, malformed, mismatched or not-live enrichment falls back to nothin
   assert.equal(activity(label({}, { program: { key: "codex" } }), NOW), null);
   assert.equal(activity(label({}, { state: "finished" }), NOW), null);
   assert.equal(activity(label({ title: "x".repeat(81) }), NOW), null);
+});
+
+test("token limits count code points, so astral text up to 80 is kept and longer is rejected", () => {
+  const astral = "\u{1F600}";
+  assert.equal(activity(label({ title: astral.repeat(80) }), NOW).title, astral.repeat(80));
+  assert.equal(activity(label({ title: "x".repeat(80), todo: astral.repeat(41) }), NOW).todo, astral.repeat(41));
+  assert.equal(activity(label({ title: astral.repeat(81) }), NOW), null);
+  assert.equal(activity(label({ sub1: astral.repeat(81) }), NOW), null);
+});
+
+test("Smart Tabs and the Agent Picker read the label with the same activity() as the cards", async () => {
+  const { readFile } = await import("node:fs/promises");
+  const body = async (mod) => /function activity\([\s\S]*?\n\}\n/.exec(await readFile(new URL(`../navigation/mods/${mod}/main.js`, import.meta.url), "utf8"))[0];
+  const cards = await body("agents-enriched");
+  assert.equal(await body("tabs-enriched"), cards);
+  assert.equal(await body("picker-enriched"), cards);
 });
 
 test("a checklist summary splits into counts and the active task", () => {
@@ -398,6 +414,22 @@ test("reported sub-agents are text: no terminal, even when an id looks like one"
   const all = [{ address: "t1", state: "live" }, { address: "t2", state: "live" }];
   const order = keyOrder([{ id: "sec-2", members: [agent("t1", "working")] }], new Set(), new Set(["t1"]), (a) => children(all, a.address));
   assert.deepEqual(order.map((o) => o.key), ["sec-2", "t1"]);
+});
+
+test("long tooltip lines wrap into rows of at most 64 code points, losing nothing", () => {
+  const branch = "feature/" + "b".repeat(192), folder = "/home/u/" + "\u{1F600}d/".repeat(168);
+  const f = cardFacts(agent("t1", "working"), label({}, {}, { ...full, branch, workspace: folder, title: "word ".repeat(60).trim() }), null, "1", NOW);
+  const text = hoverText(f, []);
+  for (const row of text.split("\n")) assert.ok([...row].length <= 64, row);
+  assert.ok(text.replace(/\n/g, "").includes(`Branch ${branch}`));
+  assert.ok(text.replace(/\n/g, "").includes(`Folder ${folder}`));
+  // Prose breaks at a space, which the break replaces.
+  assert.equal(wrapLine("aaaa bbbb cccc", 10), "aaaa bbbb\ncccc");
+  assert.equal(wrapLine("x".repeat(64)), "x".repeat(64));
+  // A space in the row's first half is kept; the word after it is cut instead.
+  assert.equal(wrapLine("ab " + "x".repeat(10), 10), "ab xxxxxxx\nxxx");
+  // Rows of a multi-line reason are wrapped one by one.
+  assert.equal(hoverText(cardFacts(agent("t3", "idle"), null, null, "2", NOW), ["one\ntwo"]), "Claude Code\none\ntwo");
 });
 
 test("the hover summary previews the details, which stay on the card without it", () => {
