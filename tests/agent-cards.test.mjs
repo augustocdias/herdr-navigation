@@ -13,16 +13,24 @@ registerHooks({
   resolve: (specifier, context, next) =>
     specifier in stubs ? { url: `data:text/javascript,${encodeURIComponent(stubs[specifier])}`, shortCircuit: true } : next(specifier, context),
 });
-const { activity, parseTodo, attentionReason, cardFacts, arrange, sections, keepPresent, children, keyOrder, childAlerts, rowSpans, reveal, CARD_INSET, scrollStep, thumb, dragScroll, rowsOf, pageScroll, railOrder } = await import("../navigation/mods/agents-enriched/main.js");
+const { activity, activityDetails, taskLine, hoverText, parseTodo, attentionReason, cardFacts, arrange, sections, keepPresent, children, keyOrder, childAlerts, rowSpans, reveal, CARD_INSET, scrollStep, thumb, dragScroll, rowsOf, pageScroll, railOrder } = await import("../navigation/mods/agents-enriched/main.js");
 
 const NOW = 1_000_000;
 const tokens = { agent: "claude-opus", title: "Fix login", todo: "2/5 Writing tests", sub1: "Explore: find callers", sub2: "", sub3: "", submore: "" };
-const label = (extra = {}, terminal = {}) => ({
+const label = (extra = {}, terminal = {}, details) => ({
   state: "live",
   program: { key: "claude" },
-  labels: { "nix.activity": JSON.stringify({ version: 1, expires: NOW + 1000, agent: "claude", tokens: { ...tokens, ...extra } }) },
+  labels: { "nix.activity": JSON.stringify({ version: 1, session: "s-1", expires: NOW + 1000, agent: "claude", tokens: { ...tokens, ...extra }, ...(details ? { details } : {}) }) },
   ...terminal,
 });
+const full = {
+  model: "claude-opus-4",
+  title: "Fix the login redirect loop after the session cookie expires",
+  workspace: "/home/u/web/packages/auth",
+  branch: "fix/login-redirect",
+  tasks: { completed: 3, total: 7, active: ["Writing tests", "Updating the changelog"] },
+  subagents: { total: 4, items: [{ id: "toolu_t2", type: "Explore", description: "find callers of redirect()" }, { id: "a9", type: "Plan", description: "" }] },
+};
 const agent = (address, status, extra = {}) => ({ address, status, pane: `p-${address}`, space: "s1", space_name: "web", tab: "t1", title: "", program: { name: "Claude Code", key: "claude" }, seq: 1, ...extra });
 
 test("live, unexpired enrichment from the same program is read", () => {
@@ -251,4 +259,155 @@ test("rows and their child keys come from the keyboard order", () => {
   assert.deepEqual(rowsOf(order), [{ key: "sec-4", kids: [] }, { key: "a", kids: ["a>k1"] }, { key: "b", kids: [] }]);
   // The rail's expand control sits below the rows, like the sort button above them.
   assert.deepEqual(rowsOf([{ key: "a", agent: {} }, { key: "#expand", expand: true }]), [{ key: "a", kids: [] }]);
+});
+
+test("complete details fill the expanded card, beside the unchanged title", () => {
+  const pane = { cwd: "/home/u/web", branch: "main" };
+  const f = cardFacts(agent("t1", "working"), label({}, {}, full), pane, "1", NOW);
+  // The header keeps the token title; the details carry the long one.
+  assert.equal(f.title, "Fix login");
+  assert.equal(f.fullTitle, full.title);
+  assert.equal(f.model, "claude-opus-4");
+  // The reporter's working directory and branch win over the pane's.
+  assert.equal(f.folder, "/home/u/web/packages/auth");
+  assert.equal(f.branch, "fix/login-redirect");
+  assert.equal(f.workspace, "web");
+  assert.deepEqual(f.progress, { done: 3, total: 7 });
+  assert.equal(f.task, "Writing tests");
+  assert.deepEqual(f.tasks, ["Writing tests", "Updating the changelog"]);
+  assert.deepEqual(f.reported, ["Explore: find callers of redirect()", "Plan", "2 more"]);
+  assert.equal(f.reportedTotal, 4);
+});
+
+test("the compact row stays one line: counts and the first active task", () => {
+  const f = cardFacts(agent("t1", "working"), label({}, {}, full), null, "1", NOW);
+  assert.equal(taskLine(f), "3/7 · Writing tests");
+  assert.equal(taskLine(cardFacts(agent("t1", "working"), label({ todo: "0/3" }), null, "1", NOW)), "0/3");
+  assert.equal(taskLine(cardFacts(agent("t1", "working"), null, null, "1", NOW)), null);
+});
+
+test("partial details fill only their fields; the rest comes from tokens and the pane", () => {
+  const pane = { cwd: "/home/u/web", branch: "main" };
+  const f = cardFacts(agent("t1", "working"), label({}, {}, { model: "gpt-5" }), pane, "1", NOW);
+  assert.equal(f.model, "gpt-5");
+  assert.equal(f.fullTitle, "Fix login");
+  assert.equal(f.folder, "/home/u/web");
+  assert.equal(f.branch, "main");
+  assert.deepEqual(f.progress, { done: 2, total: 5 });
+  assert.deepEqual(f.tasks, ["Writing tests"]);
+  assert.deepEqual(f.reported, ["Explore: find callers"]);
+  assert.equal(f.reportedTotal, null);
+  // Counts without an active task: no task, still the counts.
+  const counts = cardFacts(agent("t1", "working"), label({}, {}, { tasks: { completed: 0, total: 2, active: [] } }), null, "1", NOW);
+  assert.deepEqual(counts.progress, { done: 0, total: 2 });
+  assert.equal(counts.task, null);
+});
+
+test("long text up to the contract's limits is kept whole; longer fields are dropped", () => {
+  const long = { title: "t".repeat(300), workspace: "/" + "w".repeat(511), branch: "b".repeat(200), model: "m".repeat(128),
+    tasks: { completed: 1, total: 1, active: ["a".repeat(200)] }, subagents: { total: 1, items: [{ id: "i".repeat(128), type: "y".repeat(64), description: "d".repeat(200) }] } };
+  const f = cardFacts(agent("t1", "working"), label({}, {}, long), null, "1", NOW);
+  assert.equal(f.fullTitle, long.title);
+  assert.equal(f.folder, long.workspace);
+  assert.equal(f.branch, long.branch);
+  assert.equal(f.model, long.model);
+  assert.deepEqual(f.tasks, [long.tasks.active[0]]);
+  assert.deepEqual(f.reported, [`${"y".repeat(64)}: ${"d".repeat(200)}`]);
+  // Code points, not UTF-16 units: 300 emoji are within the title limit.
+  assert.equal(activityDetails(label({}, {}, { title: "😀".repeat(300) }), NOW).title, "😀".repeat(300));
+  const over = cardFacts(agent("t1", "working"), label({}, {}, { title: "t".repeat(301), model: "m".repeat(129), branch: "b".repeat(201) }), null, "1", NOW);
+  assert.equal(over.fullTitle, "Fix login");
+  assert.equal(over.model, "claude-opus");
+  assert.equal(over.branch, null);
+});
+
+test("malformed details are ignored field by field, never trusted", () => {
+  const read = (details) => activityDetails(label({}, {}, details), NOW);
+  assert.equal(read({ tasks: { completed: 3, total: 2, active: [] } }).tasks, null);
+  assert.equal(read({ tasks: { completed: 0, total: 0, active: [] } }).tasks, null);
+  assert.equal(read({ tasks: { completed: true, total: 2, active: [] } }).tasks, null);
+  assert.equal(read({ tasks: { completed: 1.5, total: 2, active: [] } }).tasks, null);
+  assert.equal(read({ tasks: { completed: 1, total: 10001, active: [] } }).tasks, null);
+  assert.equal(read({ tasks: { completed: 1, total: 2, active: ["a", "b", "c", "d", "e", "f"] } }).tasks, null);
+  assert.equal(read({ tasks: { completed: 1, total: 2, active: [""] } }).tasks, null);
+  assert.equal(read({ subagents: { total: 1, items: [{ id: "a", type: "x", description: "" }, { id: "b", type: "y", description: "" }] } }).subagents, null);
+  assert.equal(read({ subagents: { total: 2, items: [{ id: "a", type: "x", description: "" }, { id: "a", type: "y", description: "" }] } }).subagents, null);
+  assert.equal(read({ subagents: { total: 1, items: [{ id: "a", type: "", description: "" }] } }).subagents, null);
+  assert.equal(read({ subagents: { total: 0, items: [] } }).subagents, null);
+  assert.equal(read({ subagents: "Explore" }).subagents, null);
+  assert.equal(read({ model: "line\nbreak" }).model, null);
+  assert.equal(read({ model: 42 }).model, null);
+  // A bad field leaves the good ones, and the tokens, in place.
+  const f = cardFacts(agent("t1", "working"), label({}, {}, { model: "gpt-5", tasks: { completed: 9, total: 2, active: [] } }), null, "1", NOW);
+  assert.equal(f.model, "gpt-5");
+  assert.deepEqual(f.progress, { done: 2, total: 5 });
+  // details that are not an object are no details.
+  for (const bad of [null, [], "x", 3]) assert.equal(activityDetails(label({}, {}, bad), NOW), null);
+});
+
+test("older reports without details read exactly as before", () => {
+  const pane = { cwd: "/home/u/web", branch: "fix-login" };
+  const f = cardFacts(agent("t1", "working"), label(), pane, "1", NOW);
+  assert.equal(activityDetails(label(), NOW), null);
+  assert.equal(f.fullTitle, "Fix login");
+  assert.equal(f.model, "claude-opus");
+  assert.equal(f.folder, "/home/u/web");
+  assert.deepEqual(f.tasks, ["Writing tests"]);
+  assert.equal(taskLine(f), "2/5 · Writing tests");
+});
+
+test("expired, foreign or rejected labels show no details either", () => {
+  const expired = label({}, {}, full);
+  expired.labels["nix.activity"] = expired.labels["nix.activity"].replace(`"expires":${NOW + 1000}`, `"expires":${NOW - 1}`);
+  assert.equal(activityDetails(expired, NOW), null);
+  assert.equal(activityDetails(label({}, { program: { key: "codex" } }, full), NOW), null);
+  assert.equal(activityDetails(label({}, { state: "finished" }, full), NOW), null);
+  // Tokens the reader rejects take the details with them.
+  assert.equal(activityDetails(label({ title: "x".repeat(81) }, {}, full), NOW), null);
+  const f = cardFacts(agent("t1", "idle"), expired, { cwd: "/home/u/web" }, "Review", NOW);
+  assert.equal(f.model, null);
+  assert.equal(f.folder, "/home/u/web");
+  assert.deepEqual(f.reported, []);
+  assert.deepEqual(f.tasks, []);
+});
+
+test("a new session shows only what its own report says", () => {
+  const before = cardFacts(agent("t1", "working"), label({}, {}, full), null, "1", NOW);
+  assert.equal(before.model, "claude-opus-4");
+  // The reporter replaced the label for a new session, without details yet.
+  const next = label({ title: "New chat", todo: "", sub1: "" }, {});
+  next.labels["nix.activity"] = next.labels["nix.activity"].replace('"s-1"', '"s-2"');
+  const after = cardFacts(agent("t1", "working"), next, null, "1", NOW);
+  assert.equal(after.title, "New chat");
+  assert.equal(after.model, "claude-opus");
+  assert.equal(after.progress, null);
+  assert.deepEqual(after.reported, []);
+  // Empty tokens clear the enrichment: details beside them are ignored.
+  const cleared = label({ agent: "", title: "", todo: "", sub1: "" }, {}, full);
+  assert.equal(activityDetails(cleared, NOW), null);
+  // Only the seven known tokens count: an extra key doesn't undo the clearing.
+  assert.equal(activityDetails(label({ agent: "", title: "", todo: "", sub1: "", extra: "x" }, {}, full), NOW), null);
+});
+
+test("reported sub-agents are text: no terminal, even when an id looks like one", () => {
+  // The reporter's item id equals a live terminal's address; it must not become a row.
+  const items = [{ id: "t2", type: "Explore", description: "callers" }];
+  const f = cardFacts(agent("t1", "working"), label({}, {}, { subagents: { total: 1, items } }), null, "1", NOW);
+  assert.deepEqual(f.reported, ["Explore: callers"]);
+  assert.ok(!JSON.stringify(f).includes('"t2"'));
+  const all = [{ address: "t1", state: "live" }, { address: "t2", state: "live" }];
+  const order = keyOrder([{ id: "sec-2", members: [agent("t1", "working")] }], new Set(), new Set(["t1"]), (a) => children(all, a.address));
+  assert.deepEqual(order.map((o) => o.key), ["sec-2", "t1"]);
+});
+
+test("the hover summary previews the details, which stay on the card without it", () => {
+  const f = cardFacts(agent("t1", "working"), label({}, {}, full), { cwd: "/x" }, "1", NOW);
+  assert.equal(hoverText(f, []), [
+    "Fix login", "3/7 · Writing tests", "Model claude-opus-4", "Branch fix/login-redirect",
+    "Folder /home/u/web/packages/auth", "4 reported sub-agents, no terminal",
+  ].join("\n"));
+  // A reason replaces the task; a legacy list without a total gives no count.
+  const legacy = cardFacts(agent("t1", "blocked"), label(), null, "1", NOW);
+  assert.equal(hoverText(legacy, ["Needs attention"]), ["Fix login", "Needs attention", "Model claude-opus", "Reported sub-agents, no terminal"].join("\n"));
+  assert.equal(hoverText(cardFacts(agent("t3", "idle"), null, null, "2", NOW), []), "Claude Code");
 });

@@ -88,6 +88,41 @@ export function activity(terminal, now = Date.now()) {
   }
 }
 
+// The label's optional `details`, read only beside tokens activity() accepts and that
+// aren't all empty (empty tokens clear the enrichment). Each field is checked against the
+// reporter's limits on its own: a bad one is null, the rest still show. The relay already
+// rejects a report with unknown keys whole; this reader stays lenient so one odd field
+// can't blank a card. Sub-agent ids are dropped here: a reported sub-agent has no
+// terminal, and its id must never be taken for one.
+// Sessions: the reporter rewrites this one label when its session changes, and Core gives
+// no session to compare with, so nothing here outlives the label it was read from.
+const CONTROL = /\p{Cc}/u;
+const bounded = (s, max, empty = false) =>
+  typeof s === "string" && [...s].length <= max && (empty || s.trim() !== "") && !CONTROL.test(s) ? s : null;
+const isCount = (n) => Number.isInteger(n) && n >= 0 && n <= 10000;
+export function activityDetails(terminal, now = Date.now()) {
+  const act = activity(terminal, now);
+  if (!act || ["agent", "title", "todo", "sub1", "sub2", "sub3", "submore"].every((k) => !act[k])) return null;
+  const d = JSON.parse(terminal.labels["nix.activity"]).details;
+  if (!d || typeof d !== "object" || Array.isArray(d)) return null;
+  const t = d.tasks, s = d.subagents;
+  const tasks = t && isCount(t.completed) && isCount(t.total) && t.total >= 1 && t.completed <= t.total
+    && Array.isArray(t.active) && t.active.length <= 5 && t.active.every((x) => bounded(x, 200));
+  const items = s && Array.isArray(s.items) && s.items.length <= 8
+    && s.items.every((i) => bounded(i?.id, 128) && bounded(i.type, 64) && bounded(i.description, 200, true) !== null)
+    && new Set(s.items.map((i) => i.id)).size === s.items.length;
+  return {
+    model: bounded(d.model, 128),
+    title: bounded(d.title, 300),
+    workspace: bounded(d.workspace, 512),
+    branch: bounded(d.branch, 200),
+    tasks: tasks ? { completed: t.completed, total: t.total, active: [...t.active] } : null,
+    subagents: items && isCount(s.total) && s.total >= Math.max(1, s.items.length)
+      ? { total: s.total, items: s.items.map(({ type, description }) => ({ type, description })) }
+      : null,
+  };
+}
+
 // The reporter's checklist summary, "2/5 Writing tests": counts, then the active task.
 export function parseTodo(todo) {
   const m = /^(\d+)\/(\d+)(?:\s+(.*))?$/.exec(oneLine(todo));
@@ -116,25 +151,55 @@ export function childAlerts(subs, listed) {
     .map((s) => ({ address: s.t.address, name: childName(s.t), reason: attentionReason("blocked", s.t.report) }));
 }
 
-// What a card shows, from native data and, while it is valid, the `nix.activity` label.
-// `label`: the agent's tab label (see `title`). Missing fields are null, never guessed.
+// What a card shows, from native data and, while it is valid, the `nix.activity` label:
+// its details where reported, else its tokens. `label`: the agent's tab label (see
+// `title`). Missing fields are null, never guessed. `title` stays the token title the tab
+// shows; `fullTitle` is the details' longer one for the expanded card.
 export function cardFacts(a, terminal, pane, label, now = Date.now()) {
   const act = activity(terminal, now);
+  const d = activityDetails(terminal, now) ?? {};
   const todo = act?.todo ? parseTodo(act.todo) : null;
-  const reported = act ? ["sub1", "sub2", "sub3"].map(k => act[k]).filter(Boolean) : [];
-  if (act?.submore) reported.push(`More: ${act.submore}`);
+  let reported;
+  if (d.subagents) {
+    reported = d.subagents.items.map((i) => (i.description.trim() ? `${i.type}: ${i.description}` : i.type));
+    const more = d.subagents.total - d.subagents.items.length;
+    if (more > 0) reported.push(`${more} more`);
+  } else {
+    reported = act ? ["sub1", "sub2", "sub3"].map(k => act[k]).filter(Boolean) : [];
+    if (act?.submore) reported.push(`More: ${act.submore}`);
+  }
   const tabLabel = label && !/^\d+$/.test(label) ? label : "";
+  const title = oneLine(act?.title) || oneLine(terminal?.report?.title) || tabLabel || a.program?.name || oneLine(a.title) || a.address;
+  const task = (todo ? todo.task : oneLine(act?.todo)) || null;
+  const tasks = d.tasks ? d.tasks.active.map(oneLine) : task ? [task] : [];
   return {
-    title: oneLine(act?.title) || oneLine(terminal?.report?.title) || tabLabel || a.program?.name || oneLine(a.title) || a.address,
+    title,
+    fullTitle: oneLine(d.title) || title,
     attention: attentionReason(a.status, terminal?.report),
-    task: (todo ? todo.task : oneLine(act?.todo)) || null,
-    progress: todo ? { done: todo.done, total: todo.total } : null,
-    model: oneLine(act?.agent) || null,
+    task: tasks[0] ?? null,
+    tasks,
+    progress: d.tasks ? { done: d.tasks.completed, total: d.tasks.total } : todo ? { done: todo.done, total: todo.total } : null,
+    model: d.model || oneLine(act?.agent) || null,
     workspace: a.space_name || null,
-    folder: pane?.cwd || null,
-    branch: pane?.branch || null,
+    // The reporter's working directory and branch are the agent's own; the pane's are where it started.
+    folder: d.workspace || pane?.cwd || null,
+    branch: d.branch || pane?.branch || null,
     reported,
+    reportedTotal: d.subagents?.total ?? null,
   };
+}
+
+// A collapsed card's one line under the title: checklist counts and the active task.
+export function taskLine(f) {
+  return f.task || f.progress ? [f.progress && `${f.progress.done}/${f.progress.total}`, f.task].filter(Boolean).join(" · ") : null;
+}
+
+// A card's tooltip: a preview of its details, all of which the card and its details also show.
+export function hoverText(f, attention) {
+  const subs = f.reportedTotal ? `${f.reportedTotal} reported sub-agent${f.reportedTotal === 1 ? "" : "s"}, no terminal`
+    : f.reported.length ? "Reported sub-agents, no terminal" : null;
+  return [f.title, ...(attention.length ? attention : [taskLine(f)]), f.model && `Model ${f.model}`,
+    f.branch && `Branch ${f.branch}`, f.folder && `Folder ${f.folder}`, subs].filter(Boolean).join("\n");
 }
 
 // Priority order, or agents() order when grouped by space. Agent pins are gone: any
@@ -459,20 +524,21 @@ export default class Agents extends View {
 
   details(t, a, f, subs) {
     const id = (k) => `${k}-${a.address}`;
-    const progress = f.progress ? `${f.progress.done} of ${f.progress.total} done` : null;
+    const progress = f.progress ? `${f.progress.done}/${f.progress.total} done` : null;
     const workspace = [f.workspace, f.folder].filter(Boolean).join(" · ");
+    const reported = `Reported sub-agents${f.reportedTotal ? ` (${f.reportedTotal})` : ""}, no terminal`;
     return v_flex().id(id("details")).pt(6).mt(2).gap(4).border_t(1).border_color(t.border)
-      .child(this.fact(t, id("title"), "Title", f.title))
-      .when(Boolean(f.task || progress), el => el.child(this.fact(t, id("task"), "Task", [progress, f.task].filter(Boolean).join(" · "))))
-      .when(!f.task && !progress, el => el.child(this.fact(t, id("task"), "Task", "None reported")))
+      .child(this.fact(t, id("title"), "Title", f.fullTitle))
+      .child(this.fact(t, id("task"), "Task", [progress, ...f.tasks].filter(Boolean).join(" · ") || "None reported"))
       .child(this.fact(t, id("model"), "Model", f.model ?? "Not reported"))
-      .when(Boolean(workspace), el => el.child(this.fact(t, id("workspace"), "Workspace", workspace)))
+      .child(this.fact(t, id("workspace"), "Workspace", workspace || "Not reported"))
       .child(this.fact(t, id("branch"), "Branch", f.branch ?? "No branch"))
+      // What the agent says it runs inside itself: text only, nothing to open.
       .when(f.reported.length > 0, el => el.child(v_flex().id(id("reported")).gap(2)
-        .child(div().text_size(11.5).text_color(t.dim).child("Reported by the agent"))
+        .child(div().text_size(11.5).text_color(t.dim).child(reported))
         .children(f.reported.map((text, i) => div().id(id(`reported-${i}`)).pl(8).text_size(11.5).whitespace_normal().text_color(t.muted).child(text)))))
-      // The child rows follow the details inside the card (see card).
-      .when(subs.length > 0, el => el.child(div().id(id("subs")).text_size(11.5).text_color(t.dim).child("Sub-agents")));
+      // The child rows follow the details inside the card (see card); only they open a terminal.
+      .when(subs.length > 0, el => el.child(div().id(id("subs")).text_size(11.5).text_color(t.dim).child("Child terminals")));
   }
 
   render(cx) {
@@ -568,10 +634,10 @@ export default class Agents extends View {
       // Without a space header above (priority), the card names its space.
       const where = byPriority ? a.space_name : null;
       const alerts = childAlerts(subs, this.listed).map((x) => `${x.name}: ${x.reason}`);
-      const task = f.task || f.progress ? [f.progress && `${f.progress.done}/${f.progress.total}`, f.task].filter(Boolean).join(" · ") : null;
+      const task = taskLine(f);
       const attention = [f.attention, ...alerts].filter(Boolean);
       const line = attention.length ? attention.join("; ") : task;
-      const quick = [f.title, ...(attention.length ? attention : [task]), f.model, f.branch && `Branch ${f.branch}`].filter(Boolean).join("\n");
+      const quick = hoverText(f, attention);
       const disclose = `${open ? "Hide" : "Show"} details for ${f.title}`;
       const pad = pic ? 24 : 0;
       // Spacing lives inside the measured wrapper, so heights stack (see rowSpans).
