@@ -85,6 +85,78 @@ test("a blocked agent says why when it reported a reason, else Needs attention",
   assert.equal(attentionReason("done", null), null);
 });
 
+// Shapes the harnesses' own OSC 7501 reports take once Core has decoded them.
+const omp = (kind, msg) => ({ app: "omp", state: "blocked", kind, msg });
+test("supported reporters give their own reason; others read Needs attention", () => {
+  assert.equal(attentionReason("blocked", omp("permission", "Allow bash: npm test")), "Allow bash: npm test");
+  assert.equal(attentionReason("blocked", omp("question", "Which base branch?")), "Which base branch?");
+  assert.equal(attentionReason("blocked", { app: "claude-code", state: "blocked", kind: "auth" }), "Needs sign-in");
+  // A program that reports blocked with no kind or message, or a kind nobody defined.
+  assert.equal(attentionReason("blocked", { app: "codex", state: "blocked" }), "Needs attention");
+  assert.equal(attentionReason("blocked", { app: "pi", state: "blocked", kind: "review" }), "Needs attention");
+});
+
+test("a malformed or oversized message is ignored, never shown in part", () => {
+  const max = "é".repeat(2048);
+  assert.equal(attentionReason("blocked", omp("question", max)), max);
+  // Checked before spaces are collapsed: a newline is a control character, and a double space
+  // doesn't bring an oversized message under the bound.
+  for (const msg of [42, { text: "x" }, ["Allow?"], "   ", "Allow\u001b[31m rm", "Allow\u0000 rm", "Allow\nrm", "é".repeat(2049), `a  ${"b".repeat(2046)}`]) {
+    assert.equal(attentionReason("blocked", omp("permission", msg)), "Waiting for permission", JSON.stringify(msg).slice(0, 40));
+    assert.equal(attentionReason("blocked", { state: "blocked", msg }), "Needs attention");
+  }
+  assert.equal(attentionReason("blocked", "blocked"), "Needs attention");
+});
+
+test("a resolved blocker or a new session leaves no old reason behind", () => {
+  // Core replaces the whole report each time, so these are the reports the card sees in turn.
+  const reports = [omp("permission", "Allow bash: rm -rf build"), { app: "omp", state: "working" }, { app: "omp", state: "blocked" }];
+  assert.deepEqual(reports.map((r) => attentionReason(r.state, r)), ["Allow bash: rm -rf build", null, "Needs attention"]);
+  // agents() already moved on while the terminal still holds the blocked report: no reason.
+  assert.equal(attentionReason("working", reports[0]), null);
+  assert.equal(attentionReason("idle", reports[0]), null);
+  assert.equal(attentionReason("done", reports[0]), null);
+  // A new session's first report replaces the old one's message, also when another harness
+  // now runs in the terminal: only the current report counts.
+  const next = [omp("question", undefined), { app: "claude-code", state: "blocked", kind: "auth" }];
+  assert.deepEqual(next.map((r) => attentionReason("blocked", r)), ["Has a question", "Needs sign-in"]);
+});
+
+test("a reason never comes from the activity label, its tasks or its freshness", () => {
+  const blocked = agent("t1", "blocked");
+  // Live label with a title and a task, but a report without a reason.
+  assert.equal(cardFacts(blocked, label({}, { report: { state: "blocked" } }), null, "1", NOW).attention, "Needs attention");
+  // An expired label next to a reported reason: the reason is the report's alone.
+  const expired = label({}, { report: omp("question", "Which base branch?") });
+  assert.equal(cardFacts(blocked, expired, null, "1", NOW + 5000).attention, "Which base branch?");
+  // A working agent with a long-quiet label still has no reason.
+  assert.equal(cardFacts(agent("t1", "working"), label(), null, "1", NOW).attention, null);
+});
+
+test("a blocked grandchild marks its top parent; finished or calm children do not", () => {
+  const all = [
+    { address: "t1", state: "live" },
+    { address: "t2", parent: "t1", state: "live", name: "lead", status: "working" },
+    { address: "t3", parent: "t2", state: "live", name: "reviewer", status: "blocked", report: omp("question", "Squash or merge?") },
+    { address: "t4", parent: "t1", state: "finished", name: "gone", status: "blocked", report: omp("question", "Old question") },
+    { address: "t5", parent: "t1", state: "live", name: "docs", status: "done" },
+  ];
+  assert.deepEqual(childAlerts(children(all, "t1"), new Map()), [{ address: "t3", name: "reviewer", reason: "Squash or merge?" }]);
+  // The child's question was answered: its next report says working, and the alert goes.
+  all[2] = { ...all[2], status: "working", report: { app: "omp", state: "working" } };
+  assert.deepEqual(childAlerts(children(all, "t1"), new Map()), []);
+});
+
+test("a child alert lifts its parent in priority sections only; space groups stay put", () => {
+  const list = [agent("p", "working", { space: "s1", space_name: "web" }), agent("q", "idle", { space: "s2", space_name: "api" })];
+  const lifted = new Map([["p", 4], ["q", 1]]);
+  const rankOf = (a) => lifted.get(a.address);
+  const byPriority = sections(arrange(list, rankOf, () => 0, true), rankOf, true);
+  assert.deepEqual(byPriority.map((g) => [g.label, g.members.map((a) => a.address)]), [["Needs you", ["p"]], ["Idle", ["q"]]]);
+  const grouped = sections(arrange(list, rankOf, () => 0, false), rankOf, false);
+  assert.deepEqual(grouped.map((g) => [g.label, g.members.map((a) => a.address)]), [["web", ["p"]], ["api", ["q"]]]);
+});
+
 test("a card shows enriched details and falls back to native data without them", () => {
   const pane = { cwd: "/home/u/web", branch: "fix-login" };
   const rich = cardFacts(agent("t1", "working"), label(), pane, "1", NOW);

@@ -131,11 +131,15 @@ export function parseTodo(todo) {
 
 // Why a blocked agent needs you: its 7501 report's own message, whole, or kind while that
 // report is the blocked one, else "Needs attention". Other states have no reason.
+// Core keeps one report per terminal and replaces it whole, so a resolved blocker or a new
+// session leaves no old message. Core also drops a message over 2048 UTF-8 bytes or with
+// control characters. Here a message with control characters or over 2048 code points (a
+// looser bound, so nothing Core keeps is lost) is ignored, not cut.
 const KIND = { permission: "Waiting for permission", question: "Has a question", auth: "Needs sign-in" };
 export function attentionReason(status, report) {
   if (status !== "blocked") return null;
   if (report?.state === "blocked") {
-    const msg = oneLine(report.msg);
+    const msg = bounded(report.msg, 2048) && oneLine(report.msg);
     if (msg) return msg;
     if (KIND[report.kind]) return KIND[report.kind];
   }
@@ -600,25 +604,29 @@ export default class Agents extends View {
       return tab ? title(tab, lead(tab, paneList)) : a.title || a.program?.name || "";
     };
 
-    // The rail: a number and a status per agent, as in Herdr's list.
-    const railRow = (a, i) => h_flex()
-      .id(`ag-${a.address}`)
-      .on_size_change(this.measure(a.address))
-      .h(26)
-      .px(8)
-      .flex_none()
-      .items_center()
-      .gap(4)
-      .when(keyboard && this.cursor === a.address, (el) => el.bg(t.selected))
-      .hover((s) => s.bg(t.hover))
-      .role("list_box_option")
-      .aria_selected(this.cursor === a.address)
-      .when(keyboard && this.cursor === a.address, (el) => el.aria_active_descendant())
-      .accessibility_label(`${i + 1}, ${label(a) || a.program?.name || a.address}, ${STATUS_WORD[a.status] ?? a.status}. Enter opens its terminal.`)
-      .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
-      .on_click((_e, cx) => { this.cursor = a.address; run("pane.focus", { pane: a.pane }); cx.notify(); })
-      .child(div().flex_1().min_w(0).whitespace_nowrap().text_right().text_color(t.muted).child(String(i + 1)))
-      .child(h_flex().w(14).flex_none().items_center().justify_center().child(this.status(t, a, true)));
+    // The rail: a number and a status per agent, as in Herdr's list. A blocked child turns
+    // its parent's number red; the status stays the parent's own.
+    const railRow = (a, i) => {
+      const alert = a.status !== "blocked" && rankOf(a) === RANK.blocked;
+      return h_flex()
+        .id(`ag-${a.address}`)
+        .on_size_change(this.measure(a.address))
+        .h(26)
+        .px(8)
+        .flex_none()
+        .items_center()
+        .gap(4)
+        .when(keyboard && this.cursor === a.address, (el) => el.bg(t.selected))
+        .hover((s) => s.bg(t.hover))
+        .role("list_box_option")
+        .aria_selected(this.cursor === a.address)
+        .when(keyboard && this.cursor === a.address, (el) => el.aria_active_descendant())
+        .accessibility_label(`${i + 1}, ${label(a) || a.program?.name || a.address}, ${STATUS_WORD[a.status] ?? a.status}${alert ? ", a sub-agent needs you" : ""}. Enter opens its terminal.`)
+        .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
+        .on_click((_e, cx) => { this.cursor = a.address; run("pane.focus", { pane: a.pane }); cx.notify(); })
+        .child(div().flex_1().min_w(0).whitespace_nowrap().text_right().when(alert, (el) => el.font_bold()).text_color(alert ? t.blocked : t.muted).child(String(i + 1)))
+        .child(h_flex().w(14).flex_none().items_center().justify_center().child(this.status(t, a, true)));
+    };
 
     // The child count, colored by the most urgent child: a child that needs you marks
     // its parent even while the card is collapsed.
