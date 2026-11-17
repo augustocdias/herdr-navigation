@@ -127,7 +127,7 @@ imports = [inputs.herdr-navigation.homeManagerModules.default];
 
 The module installs only the mods. It does not replace your keys, settings, layouts, or runtime state.
 
-Merge `inputs.herdr-navigation.lib.keys` into your existing Nix-managed key object with `lib.recursiveUpdate`. The fragment opens the picker with Alt+W, gives the agents list the keyboard with Alt+A, and lets the picker handle Escape, Tab and Shift+Tab in its own mod context. Preserve the rest of your key configuration.
+Merge `inputs.herdr-navigation.lib.keys` into your existing Nix-managed key object with `lib.recursiveUpdate`. The fragment opens the picker with Alt+W, gives the agents list the keyboard with Alt+A, and lets the picker handle Escape in its own mod context. Tab and Shift+Tab dispatch `picker-enriched.next` and `picker-enriched.previous` directly, rather than relying on raw key events that native focus traversal can consume. Update both the mod and the key fragment together. Preserve the rest of your key configuration.
 
 In your chosen layout, replace the tabs block's mod identifier `tabs` with `tabs-enriched`, the spaces block's `spaces` with `spaces-enriched`, and the agents block's `agents` with `agents-enriched`. Keep these changes declarative and rebuild your system or Home Manager configuration to apply them.
 

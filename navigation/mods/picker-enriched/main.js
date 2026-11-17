@@ -6,7 +6,7 @@
 
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input } from "gpui-base";
-import { agents, spaces, panes, terminals, run, hc, theme, settings, props, closeOverlay, openOverlay, shared, setShared } from "herdr";
+import { agents, spaces, panes, terminals, run, hc, theme, settings, props, closeOverlay, openOverlay, shared, setShared, nextCommand } from "herdr";
 
 const MARK = { ansi6: "#22a99a", ansi3: "#e3814f", ansi4: "#5b8def", ansi5: "#8b7cf6", ansi2: "#3fae6a", ansi1: "#d9649a" };
 
@@ -53,10 +53,23 @@ export default class Picker extends View {
       } catch {}
       cx.notify();
     });
+    cx.spawn(async (cx) => {
+      for (;;) {
+        const command = await nextCommand();
+        if (command !== "next" && command !== "previous") continue;
+        const count = this.rows().filter(r => r.kind === "ctx" || r.kind === "new" || r.kind === "space").length;
+        this.move(command === "next" ? 1 : -1, count);
+        cx.notify();
+      }
+    });
   }
 
   close() {
     closeOverlay(props().overlay);
+  }
+
+  move(delta, count) {
+    this.at = (this.at + delta + count) % count;
   }
 
   rows() {
@@ -235,8 +248,8 @@ export default class Picker extends View {
             this.input.set_value("");
             this.handle.focus();
           } else this.close();
-        } else if (k === "down" || (k === "tab" && !e.modifiers.shift)) this.at = (this.at + 1) % pickable.length;
-        else if (k === "up" || (k === "tab" && e.modifiers.shift)) this.at = (this.at + pickable.length - 1) % pickable.length;
+        } else if (k === "down") this.move(1, pickable.length);
+        else if (k === "up") this.move(-1, pickable.length);
         else if (k === "enter" && !this.searching) this.go(sel);
         else if (k === "d" && e.modifiers.control) {
           if (sel?.kind === "ctx") {

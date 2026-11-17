@@ -5,7 +5,7 @@
   },
   "mod:picker-enriched": {
     "escape": "terminal",
-    "tab": "terminal",
-    "shift-tab": "terminal"
+    "tab": "picker-enriched.next",
+    "shift-tab": "picker-enriched.previous"
   }
 }
