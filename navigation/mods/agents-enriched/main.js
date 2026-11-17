@@ -58,6 +58,20 @@ const SECTION = { 4: "Needs you", 3: "Done", 2: "Working", 1: "Idle" };
 const SECTION_STATUS = { 4: "blocked", 3: "done", 2: "working" };
 const STATUS_WORD = { blocked: "Needs you", done: "Done", working: "Working", idle: "Idle" };
 
+// Core can retain an agent report after its foreground process returns to the shell.
+// shortcut: shell names follow Herdr's built-in table; use a native prompt flag if the API adds one.
+const SHELLS = new Set(["zsh", "bash", "fish", "sh", "dash", "nu", "pwsh", "powershell", "cmd", "elvish", "xonsh", "tcsh", "csh", "ksh", "ion"]);
+function currentAgents(byAddress = new Map(terminals().map((t) => [t.address, t]))) {
+  return agents().filter((a) => {
+    const foreground = byAddress.get(a.address)?.foreground;
+    if (!foreground?.argv?.length) return true;
+    const name = foreground.argv[0].split(/[\\/]/).at(-1).replace(/^-+|\.exe$/gi, "").toLowerCase();
+    // Keep shell scripts and command wrappers that may still be running an agent.
+    const prompt = foreground.argv.every((arg, i) => i === 0 || /^(?:-[il]+|--login|--interactive)$/.test(arg));
+    return !SHELLS.has(name) || !prompt;
+  });
+}
+
 function duration(ms) {
   const m = Math.floor(ms / 60000);
   if (m < 1) return "<1m";
@@ -213,7 +227,7 @@ export function wrapLine(s, max = 64) {
   return [...rows, rest.join("")].join("\n");
 }
 
-// A card's tooltip: a preview of its details, all of which the card and its details also show.
+// A card's tooltip keeps full attention reasons and previews its details.
 export function hoverText(f, attention) {
   const subs = f.reportedTotal ? `${f.reportedTotal} reported sub-agent${f.reportedTotal === 1 ? "" : "s"}, no terminal`
     : f.reported.length ? "Reported sub-agents, no terminal" : null;
@@ -383,7 +397,7 @@ export default class Agents extends View {
         const command = await nextCommand();
         if (command === "focus") this.keys.focus();
         else if (command === "details") {
-          const list = agents();
+          const list = currentAgents();
           // On a child row, its card; on a header or the sort button, the agent on screen.
           const under = this.keys.is_focused() ? String(this.cursor).split(">")[0] : null;
           const a = list.find((k) => k.address === under) || list.find((k) => k.focused);
@@ -503,10 +517,12 @@ export default class Agents extends View {
       .pb(reason ? 4 : 0)
       .rounded(6)
       .flex_none()
+      .min_w(0)
       .text_size(12)
       .cursor_pointer()
       .role("button")
       .accessibility_label(`Peek at sub-agent ${name}, ${STATUS_WORD[st] ?? st}${reason ? `, ${reason}` : ""}`)
+      .when(Boolean(reason), el => el.tooltip(wrapLine(reason)))
       .border(1)
       .border_color(current ? t.accent : t.dim + "00")
       .when(on, (el) => el.bg(t.selected))
@@ -520,7 +536,7 @@ export default class Agents extends View {
         .when(Boolean(pic), el => el.child(div().mr(6).child(pic)))
         .child(div().flex_1().min_w(0).truncate().text_color(on ? t.foreground : t.muted).child(name))
         .child(this.status(t, { status: st }, true)))
-      .when(Boolean(reason), el => el.child(div().pl(13 * s.lines.length + (pic ? 19 : 0)).text_size(11.5).whitespace_normal().text_color(t.blocked).child(reason)));
+      .when(Boolean(reason), el => el.child(div().min_w(0).pl(13 * s.lines.length + (pic ? 19 : 0)).text_size(11.5).truncate().text_color(t.blocked).child(reason)));
   }
 
   // compact: a ! for blocked where a header already says "Needs you".
@@ -565,10 +581,10 @@ export default class Agents extends View {
     if (props()?.sortMenu) return this.sortMenu(t);
     const collapsed = narrow();
     const sort = sortOf();
-    let list = agents();
-    this.listed = new Map(list.map((a) => [a.address, a.status]));
     const all = terminals();
     const byAddress = new Map(all.map((k) => [k.address, k]));
+    let list = currentAgents(byAddress);
+    this.listed = new Map(list.map((a) => [a.address, a.status]));
     const paneList = panes();
     const shown = focused()?.agent;
     const now = Date.now();
@@ -666,6 +682,7 @@ export default class Agents extends View {
       // Spacing lives inside the measured wrapper, so heights stack (see rowSpans).
       return div().id(`wrap-${a.address}`).py(CARD_GAP).flex_none().on_size_change(this.measure(a.address)).child(v_flex()
         .id(`ag-${a.address}`)
+        .min_w(0)
         .px(10)
         .py(CARD_PAD)
         .rounded(9)
@@ -700,7 +717,7 @@ export default class Agents extends View {
             .hover((s) => s.bg(t.input).text_color(t.foreground))
             .on_click((_e, cx) => { cx.stop_propagation(); this.cursor = a.address; this.toggle(a.address); cx.notify(); })
             .child(svg(`mods/workspace-chrome/chevron-${open ? "down" : "right"}.svg`).size(12))))
-        .children(attention.map((text, i) => div().id(`reason-${a.address}-${i}`).pl(pad).text_size(11.5).whitespace_normal().text_color(t.blocked).child(text)))
+        .when(attention.length > 0, el => el.child(div().id(`reason-${a.address}`).min_w(0).pl(pad).text_size(11.5).truncate().text_color(t.blocked).child(line)))
         .when(!attention.length && Boolean(task), el => el.child(div().id(`task-${a.address}`).pl(pad).text_size(11.5).truncate().text_color(t.muted).child(task)))
         .when(open, el => el.child(this.details(t, a, f, subs))))
         .when(open, el => el.children(subs.map((s) => this.subRow(t, s, a.address, shown, childCursor === `${a.address}>${s.t.address}`)))));

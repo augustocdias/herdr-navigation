@@ -4,10 +4,8 @@
     "alt-a": "agents-enriched.focus"
   },
   "mod:picker-enriched": {
-    "ctrl-1": "terminal",
-    "ctrl-2": "terminal",
-    "ctrl-3": "terminal",
-    "ctrl-4": "terminal",
-    "ctrl-5": "terminal"
+    "escape": "terminal",
+    "tab": "terminal",
+    "shift-tab": "terminal"
   }
 }

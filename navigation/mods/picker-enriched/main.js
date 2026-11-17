@@ -1,8 +1,8 @@
 // Go to a tab. Drops from the Terminals layout's space chip (popup, at: "top"). Spaces with
 // something that needs you come first, quiet spaces (no agent running)
-// fold into "earlier". Type to filter, ↑/↓ and Enter to go, ctrl+d to close
-// a tab, Esc to leave. Last rows: new work (a tab here, a space on this
-// computer or on each connected machine).
+// fold into "earlier". Filter by state, / to search, ↑/↓ or Tab/Shift+Tab
+// and Enter to go, ctrl+d to close a tab. Esc leaves search before closing.
+// Last rows: new work (a tab here, a space on this computer or a connected machine).
 
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input } from "gpui-base";
@@ -36,17 +36,16 @@ function spaceColor(t, p) {
 
 export default class Picker extends View {
   init(_props, cx) {
-    this.filter = ""; this.stateFilter = "all";
-    this.input = InputState.new({ placeholder: "Go to a tab, space or agent…" });
+    this.filter = ""; this.stateFilter = "all"; this.searching = false;
+    this.handle = cx.focus_handle();
+    this.input = InputState.new({ placeholder: "Search tabs, spaces or agents…" });
     this.input.on("change", (_e, cx) => { this.filter = this.input.value(); this.at = 0; cx.notify(); });
     this.input.on("submit", () => this.go(this.rows().filter(r => r.kind === "ctx" || r.kind === "new" || r.kind === "space")[this.at]));
-    this.input.focus();
-    cx.timer.after(600, () => this.input.focus());
+    this.handle.focus();
     this.at = null;
     this.scroll = 0;
     this.showEarlier = false;
     this.machines = [];
-    this.handle = cx.focus_handle();
     cx.spawn(async (cx) => {
       try {
         const r = await hc(["machine", "ls", "--json"]);
@@ -229,15 +228,29 @@ export default class Picker extends View {
       .text_size(13)
       .on_key_down((e, cx) => {
         const k = e.key;
-        if (k === "escape") return this.close();
-        if (e.modifiers.control && /^[1-5]$/.test(k)) {
-      this.stateFilter = stateFilters[Number(k) - 1][0]; this.at = 0; this.scroll = 0;
-    } else if (k === "down") this.at = (this.at + 1) % pickable.length;
-        else if (k === "up") this.at = (this.at + pickable.length - 1) % pickable.length;
+        if (k === "escape") {
+          if (this.searching) {
+            this.searching = false;
+            this.filter = "";
+            this.input.set_value("");
+            this.handle.focus();
+          } else this.close();
+        } else if (k === "down" || (k === "tab" && !e.modifiers.shift)) this.at = (this.at + 1) % pickable.length;
+        else if (k === "up" || (k === "tab" && e.modifiers.shift)) this.at = (this.at + pickable.length - 1) % pickable.length;
+        else if (k === "enter" && !this.searching) this.go(sel);
         else if (k === "d" && e.modifiers.control) {
           if (sel?.kind === "ctx") {
             this.close();
             run("tab.close", { id: sel.ctx.id });
+          }
+        } else if (!this.searching && !e.modifiers.control && !e.modifiers.alt && !e.modifiers.platform) {
+          if (k === "/") {
+            this.searching = true;
+            this.input.focus();
+          } else {
+            const state = stateFilters.find((s) => s[2] === k);
+            if (!state) return;
+            this.stateFilter = state[0]; this.at = 0; this.scroll = 0;
           }
         } else return;
         cx.stop_propagation();
@@ -246,12 +259,13 @@ export default class Picker extends View {
       .child(filterChips(this, t))
     .when(this.stateFilter !== "all" && !rows.some(r => r.kind === "ctx"),
       el => el.child(div().text_color(t.muted).text_size(12).child("No agents match this filter")))
-    .child(h_flex().items_center().child(div().flex_1().text_size(15).font_semibold().text_color(t.foreground).child("Go to…")).child(div().text_size(11).text_color(t.dim).child("Esc")))
-      .child(
+    .child(h_flex().items_center().child(div().flex_1().text_size(15).font_semibold().text_color(t.foreground).child("Go to…"))
+      .child(div().text_size(11).text_color(t.dim).child(this.searching ? "Esc: filters" : "/: search · Esc: close")))
+      .when(this.searching, el => el.child(
         h_flex().h(36).flex_none().px(10).gap(8).items_center().rounded(9).border_1().border_color(t.accent).bg(t.background)
           .child(svg("mods/workspace-chrome/search.svg").size(15).text_color(t.dim))
           .child(Input.new(this.input).flex_1().h_full().text_size(12.8).text_color(t.foreground)),
-      )
+      ))
       .child(
         v_flex()
           .id("pk-list")
@@ -306,7 +320,7 @@ function tabTitle(tab, paneList, terminalMap) {
   return { full, text: characters.length > 80 ? `${characters.slice(0, 79).join('')}…` : full };
 }
 const stateFilters = [
-  ['all', 'All'], ['working', 'Working'], ['blocked', 'Needs you'], ['done', 'Done'], ['idle', 'Idle'],
+  ['all', 'All', 'a'], ['working', 'Working', 'w'], ['blocked', 'Needs you', 'b'], ['done', 'Done', 'd'], ['idle', 'Idle', 'i'],
 ];
 
 function matchesState(agents, state) {
@@ -314,17 +328,18 @@ function matchesState(agents, state) {
 }
 
 function filterChips(picker, t) {
-  return h_flex().gap(6).flex_none().children(stateFilters.map(([state, label], index) =>
+  return h_flex().gap(6).flex_none().children(stateFilters.map(([state, label, key]) =>
     div().id(`pk-state-${state}`).px(8).py(5).rounded(6).cursor_pointer()
       .bg(picker.stateFilter === state ? t.selected : t.background)
       .text_color(picker.stateFilter === state ? t.foreground : t.muted)
-      .text_size(11).tooltip(`Ctrl+${index + 1}: ${label}`)
+      .text_size(11).tooltip(picker.searching ? label : `${key}: ${label}`)
       .on_click((_event, cx) => {
         picker.stateFilter = state;
         picker.at = 0;
         picker.scroll = 0;
-        picker.input.focus();
+        if (picker.searching) picker.input.focus();
+        else picker.handle.focus();
         cx.notify();
-      }).child(`${index + 1} ${label}`)
+      }).child(picker.searching ? label : `${key} ${label}`)
   ));
 }
