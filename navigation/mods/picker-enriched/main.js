@@ -45,6 +45,7 @@ export default class Picker extends View {
     this.at = null;
     this.scroll = 0;
     this.showEarlier = false;
+    this.showPanes = false;
     this.machines = [];
     cx.spawn(async (cx) => {
       try {
@@ -100,7 +101,16 @@ export default class Picker extends View {
     const out = [];
     const add = (p) => {
       out.push({ kind: "head", w: p.w });
-      for (const c of p.ctxs) out.push({ kind: "ctx", ...c });
+      for (const c of p.ctxs) {
+        out.push({ kind: "ctx", ...c });
+        if (this.showPanes) {
+          for (const pane of paneList.filter((pane) => pane.tab === c.ctx.id)) {
+            const mine = c.mine.filter((a) => a.pane === pane.pane);
+            const full = paneTitle(pane, terminalMap);
+            out.push({ kind: "ctx", ...c, pane, mine, display: { full, text: full }, team: teamOf(mine.map((a) => a.address)) });
+          }
+        }
+      }
     };
     busy.forEach(add);
     if (quiet.length) {
@@ -116,7 +126,8 @@ export default class Picker extends View {
   go(r) {
     if (!r) return;
     this.close();
-    if (r.kind === "ctx") run("tab.select", { id: r.ctx.id });
+    if (r.pane) run("pane.focus", { pane: r.pane.pane });
+    else if (r.kind === "ctx") run("tab.select", { id: r.ctx.id });
     else if (r.kind === "new") run("tab.new");
     else if (r.kind === "space") run("space.new", r.machine ? { machine: r.machine } : {});
   }
@@ -214,11 +225,13 @@ export default class Picker extends View {
           .child(label);
       }
       const who = r.mine.map((a) => a.program?.name ?? "agent").join(" · ");
-      const here = r.w.active && r.ctx.active;
+      const here = r.w.active && r.ctx.active && (!r.pane || r.pane.focused);
+      const status = r.pane ? r.mine[0]?.status : r.ctx.status;
       return h_flex()
-        .id(`pk-${r.ctx.id}`)
+        .id(r.pane ? `pk-pane-${r.pane.pane}` : `pk-${r.ctx.id}`)
         .mx(4)
         .px(10)
+        .when(Boolean(r.pane), (el) => el.pl(30))
 .h(32)
         .rounded(7)
         .gap(10)
@@ -227,10 +240,10 @@ export default class Picker extends View {
         .when(on, (el) => el.bg(t.hover))
         .hover((s) => s.bg(t.hover))
         .on_click(() => this.go(r))
-        .child(this.glyph(t, r.ctx.status))
+        .child(this.glyph(t, status))
         .child(div().flex_1().truncate().text_color(t.foreground).when(here, (d) => d.font_semibold()).tooltip(r.display.full).child(r.display.text))
-        .when(r.ctx.status === "blocked", (el) => el.child(div().text_size(11).text_color(t.blocked).child("needs you")))
-        .when(r.ctx.status === "done", (el) => el.child(div().text_size(11).text_color(t.done).child("finished")))
+        .when(status === "blocked", (el) => el.child(div().text_size(11).text_color(t.blocked).child("needs you")))
+        .when(status === "done", (el) => el.child(div().text_size(11).text_color(t.done).child("finished")))
         .child(div().text_size(11).text_color(t.dim).child(who + (r.team ? `  +${r.team}` : "")));
     };
 
@@ -266,6 +279,10 @@ export default class Picker extends View {
           if (k === "/") {
             this.searching = true;
             this.input.focus();
+          } else if (k === "p" || k === "P") {
+            this.showPanes = !this.showPanes;
+            this.at = this.rows().filter(r => r.kind === "ctx" || r.kind === "new" || r.kind === "space")
+              .findIndex(r => r.kind === sel.kind && r.ctx?.id === sel.ctx?.id && r.machine === sel.machine && !r.pane);
           } else if (k === "h" || k === "k") this.move(-1, pickable.length);
           else if (k === "j" || k === "l") this.move(1, pickable.length);
           else {
@@ -281,7 +298,7 @@ export default class Picker extends View {
     .when(this.stateFilter !== "all" && !rows.some(r => r.kind === "ctx"),
       el => el.child(div().text_color(t.muted).text_size(12).child("No agents match this filter")))
     .child(h_flex().items_center().child(div().flex_1().text_size(15).font_semibold().text_color(t.foreground).child("Go to…"))
-      .child(div().text_size(11).text_color(t.dim).child(this.searching ? "Esc: filters" : "/: search · Esc: close")))
+      .child(div().text_size(11).text_color(t.dim).child(this.searching ? "Esc: filters" : `P: panes ${this.showPanes ? "on" : "off"} · /: search · Esc: close`)))
       .when(this.searching, el => el.child(
         h_flex().h(36).flex_none().px(10).gap(8).items_center().rounded(9).border_1().border_color(t.accent).bg(t.background)
           .child(svg("mods/workspace-chrome/search.svg").size(15).text_color(t.dim))
@@ -330,16 +347,18 @@ function activity(terminal, now = Date.now()) {
   }
 }
 
+function paneTitle(p, terminalMap) {
+  const program = p.program?.name || p.mod || 'Terminal';
+  const terminal = terminalMap.get(p.terminal);
+  const title = p.program?.agent ? (activity(terminal)?.title || terminal?.report?.title || p.title || '').replace(/\s+/g, ' ').trim() : '';
+  return title && title !== program ? `${program} · ${title}` : program;
+}
+
 function tabTitle(tab, paneList, terminalMap) {
   const members = paneList.filter(p => p.tab === tab.id);
   // terminal.open stores its launch program as a name even without an explicit rename.
   const launchName = tab.name === 'shell' || members.some(p => [p.program?.key, p.program?.name].includes(tab.name));
-  const full = tab.named && !launchName ? tab.name : members.map(p => {
-    const program = p.program?.name || p.mod || 'Terminal';
-    const terminal = terminalMap.get(p.terminal);
-    const title = p.program?.agent ? (activity(terminal)?.title || terminal?.report?.title || p.title || '').replace(/\s+/g, ' ').trim() : '';
-    return title && title !== program ? `${program} · ${title}` : program;
-  }).join(' | ') || tab.name;
+  const full = tab.named && !launchName ? tab.name : members.map(p => paneTitle(p, terminalMap)).join(' | ') || tab.name;
   const characters = Array.from(full);
   return { full, text: characters.length > 80 ? `${characters.slice(0, 79).join('')}…` : full };
 }

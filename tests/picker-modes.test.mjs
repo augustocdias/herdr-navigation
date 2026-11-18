@@ -2,7 +2,7 @@ import { registerHooks } from "node:module";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-let focused, closed, calls, inputs, receiveCommand;
+let focused, closed, calls, inputs, receiveCommand, paneList;
 function element(kind = "div", state) {
   const node = { kind, state, children: [], events: {}, id: null };
   const view = new Proxy(node, {
@@ -28,10 +28,11 @@ class InputState {
 }
 const states = ["blocked", "idle", "working", "done"];
 const tabs = states.map((status, i) => ({ id: `tab-${status}`, name: `${status} task`, active: i === 0, status }));
-const agentList = tabs.map((tab) => ({ address: `agent-${tab.status}`, tab: tab.id, status: tab.status, program: { name: "OMP" } }));
+const agentList = tabs.map((tab) => ({ address: `agent-${tab.status}`, pane: `pane-${tab.status}`, tab: tab.id, status: tab.status, program: { name: "OMP" } }));
 globalThis.pickerTest = {
   element, InputState,
   agents: () => agentList,
+  panes: () => paneList,
   spaces: () => [{ id: "space", name: "workspace", status: "blocked", active: true, tabs }],
   run: (name, args) => calls.push([name, args]),
   closeOverlay: () => { closed++; },
@@ -42,8 +43,8 @@ const stubs = {
   "gpui-base": `export const h_flex = () => globalThis.pickerTest.element(), v_flex = h_flex;
     export const {InputState} = globalThis.pickerTest;
     export const Input = {new: (state) => globalThis.pickerTest.element("input", state)};`,
-  herdr: `export const {agents, spaces, run, closeOverlay, nextCommand} = globalThis.pickerTest;
-    export const panes = () => [], terminals = () => [], theme = () => ({}), settings = () => ({zoom: 1}),
+  herdr: `export const {agents, spaces, panes, run, closeOverlay, nextCommand} = globalThis.pickerTest;
+    export const terminals = () => [], theme = () => ({}), settings = () => ({zoom: 1}),
       props = () => ({overlay: "picker"}), hc = async () => ({code: 0, stdout: "{}"}),
       openOverlay = () => {}, shared = () => null, setShared = () => {};`,
 };
@@ -55,8 +56,8 @@ const cx = {
   focus_handle: () => { const handle = {focus: () => { focused = handle; }}; return handle; },
   timer: {after: () => {}}, spawn: (work) => { void work(cx); }, notify: () => {}, stop_propagation: () => {},
 };
-function open() {
-  focused = null; closed = 0; calls = []; inputs = []; receiveCommand = null;
+function open(panes = []) {
+  focused = null; closed = 0; calls = []; inputs = []; receiveCommand = null; paneList = panes;
   const picker = new Picker();
   picker.init({}, cx);
   return picker;
@@ -76,6 +77,56 @@ function key(picker, key, modifiers = {}) {
 function entries(picker) {
   return nodes(picker.render()).map((node) => node.id).filter((id) => id?.startsWith("pk-tab-"));
 }
+
+const splitPanes = [
+  {pane: "pane-blocked", tab: "tab-blocked", terminal: "agent-blocked", focused: true, program: {name: "OMP", agent: true}, title: "Fix navigation"},
+  {pane: "pane-shell", tab: "tab-blocked", program: {name: "Shell"}},
+  {pane: "pane-logs", tab: "tab-idle", mod: "logs"},
+];
+function paneEntries(picker) {
+  return nodes(picker.render()).map((node) => node.id).filter((id) => id?.startsWith("pk-pane-"));
+}
+
+test("P toggles nested panes only in filter mode and each picker starts with tabs only", () => {
+  const picker = open(splitPanes);
+  assert.deepEqual(paneEntries(picker), []);
+  key(picker, "P", {shift: true});
+  assert.deepEqual(paneEntries(picker), ["pk-pane-pane-blocked", "pk-pane-pane-shell", "pk-pane-pane-logs"]);
+  key(picker, "/");
+  key(picker, "P", {shift: true});
+  assert.deepEqual(paneEntries(picker), ["pk-pane-pane-blocked", "pk-pane-pane-shell", "pk-pane-pane-logs"]);
+  key(picker, "escape");
+  key(picker, "p");
+  assert.deepEqual(paneEntries(picker), []);
+  assert.deepEqual(paneEntries(open(splitPanes)), []);
+});
+
+test("nested panes participate in navigation and Enter focuses the pane instead of its tab", async () => {
+  for (const [keys, pane] of [
+    [["j"], "pane-blocked"],
+    [["down", "tab"], "pane-shell"],
+    [["j", "j", "j", "j"], "pane-logs"],
+  ]) {
+    const picker = open(splitPanes);
+    key(picker, "p");
+    for (const name of keys) await key(picker, name);
+    key(picker, "enter");
+    assert.deepEqual(calls, [["pane.focus", {pane}]]);
+  }
+});
+
+test("toggling pane rows preserves the selected tab or action and collapses a pane to its tab", () => {
+  for (const [keys, expected] of [
+    [["j", "p"], ["tab.select", {id: "tab-idle"}]],
+    [["p", "j", "j", "p"], ["tab.select", {id: "tab-blocked"}]],
+    [["up", "p"], ["space.new", {}]],
+  ]) {
+    const picker = open(splitPanes);
+    for (const name of keys) key(picker, name);
+    key(picker, "enter");
+    assert.deepEqual(calls, [expected], JSON.stringify(keys));
+  }
+});
 
 test("picker opens in filter mode and only slash starts text search", () => {
   const picker = open();

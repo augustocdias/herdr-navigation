@@ -83,7 +83,9 @@ Open `picker-enriched` to switch tabs, spaces, or agents. It starts in filter mo
 
 These letter shortcuts apply only in filter mode. The filter chips are clickable in either mode. A tab matches if any of its agents has the selected state, even when another agent determines the tab's aggregate status. Shell-only tabs appear only under All. Herdr changes Done to Idle after you view the agent.
 
-Up and Down select rows in either mode. In filter mode, h and k select the previous entry, and j and l select the next entry. Tab selects the next entry, and Shift+Tab selects the previous entry, wrapping at either end. Enter opens the selection. Escape in search mode clears the query and returns to filter mode without closing the picker or changing the state filter. Escape in filter mode closes it. Ctrl+D closes the selected tab. New-tab and new-space actions remain available, including when no agent matches.
+Up and Down select rows in either mode. In filter mode, h and k select the previous entry, and j and l select the next entry. Tab selects the next entry, and Shift+Tab selects the previous entry, wrapping at either end. Enter opens the selection. Escape in search mode clears the query and returns to filter mode without closing the picker or changing the state filter. Escape in filter mode closes it. Ctrl+D closes a tab, even when one of its pane rows is selected. New-tab and new-space actions remain available, including when no agent matches.
+
+In filter mode, P shows or hides indented pane rows beneath each listed tab. Each picker opens with panes hidden. Pane rows use the same navigation keys; Enter or a click focuses that pane. Search and state filters still match tabs, and all panes of a matching tab appear.
 
 The selected tab's workspace title stays visible while scrolling. It pins to the top of the list when its header scrolls out of view.
 
