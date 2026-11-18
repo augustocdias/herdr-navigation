@@ -233,6 +233,8 @@ export default class Picker extends View {
     return v_flex()
       .id("picker")
       .track_focus(this.handle)
+      // Keep picker bindings inside the native Root's Tab focus-traversal context.
+      .key_context("Mod mod = picker-enriched")
       .w_full()
       .min_h(0)
       .p(18)

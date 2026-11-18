@@ -67,6 +67,8 @@ Read configured pins from `mods/tabs-enriched/pinned.json` as a list of `{ "labe
 
 Merge the repository's key fragment into existing keys. Bind Alt+W to `mod.open:picker-enriched` and Alt+A to `agents-enriched.focus`. In the picker-specific section, map Escape to `terminal`, Tab to `picker-enriched.next`, and Shift+Tab to `picker-enriched.previous`. Handle those navigation commands through `nextCommand()` so native focus traversal cannot consume the keys before the picker sees them. Update the mod and key fragment together. Ask before replacing an existing conflicting binding.
 
+Declare `.key_context("Mod mod = picker-enriched")` on the focused picker root. This places its bindings below the nested native `Root` context in the element tree, where they take precedence over native Tab traversal.
+
 The Home Manager module installs the five mods and optional pin configuration only. Declare key merging and layout installation separately. The complete layout is optional; existing layouts can replace only their tabs, spaces and agents mod identifiers.
 
 ## Watch out

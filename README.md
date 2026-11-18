@@ -129,6 +129,8 @@ The module installs only the mods. It does not replace your keys, settings, layo
 
 Merge `inputs.herdr-navigation.lib.keys` into your existing Nix-managed key object with `lib.recursiveUpdate`. The fragment opens the picker with Alt+W, gives the agents list the keyboard with Alt+A, and lets the picker handle Escape in its own mod context. Tab and Shift+Tab dispatch `picker-enriched.next` and `picker-enriched.previous` directly, rather than relying on raw key events that native focus traversal can consume. Update both the mod and the key fragment together. Preserve the rest of your key configuration.
 
+The focused picker declares `Mod mod = picker-enriched` locally so its bindings outrank the nested native `Root` context. The inherited context on the outer mod container alone does not prevent native Tab traversal.
+
 In your chosen layout, replace the tabs block's mod identifier `tabs` with `tabs-enriched`, the spaces block's `spaces` with `spaces-enriched`, and the agents block's `agents` with `agents-enriched`. Keep these changes declarative and rebuild your system or Home Manager configuration to apply them.
 
 The optional `navigation/layouts/navigation.json` provides a complete layout based on Herdr's main layout. To install it through Home Manager:
@@ -143,6 +145,8 @@ Select the Navigation layout after activation if you installed it. Each mod ship
 ## Verification and publishing
 
 Development checks used Herdr App 0.1.11 and Core 0.1.16 on Linux in a private display and Core session. The mod loader checks and live picker interactions ran through Nix-store file symlinks. No Windows or macOS runtime checks have been performed.
+
+The picker Tab-focus regression was checked on App 0.1.16 and Core 0.1.21 with private copies of the installed mod and complete keymap. Node's host stubs do not exercise native key-context precedence. Match the running desktop's executable when checking keyboard behavior; a long-lived sandbox may still expose an older CLI. Verify focus after each Tab and Shift+Tab in filter mode, and verify the search field still accepts text after each key in search mode.
 
 The preview uses synthetic agent reports, not private sessions. `node --test` checks the Space Shortcuts naming, worktree lookup, and direnv rules, and how Smart Tabs reads pinned tabs, combines configured and menu pins, builds the tab menu, and decides which tabs to open or move. It also checks what Agent Cards shows from native and `nix.activity` data, its attention reasons, its order and sections without agent pins, and which expanded cards it keeps. Before updating the mods, run `herdr-app check` on each mod folder and exercise the visible App behavior in an isolated session. Keep the title helper in both self-contained modules consistent.
 
