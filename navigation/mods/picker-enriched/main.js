@@ -147,15 +147,19 @@ export default class Picker extends View {
     const maxScroll = Math.max(0, total - height);
     this.scroll = Math.max(0, Math.min(this.scroll, maxScroll));
     const si = rows.indexOf(sel);
+    const hi = sel?.kind === "ctx" ? rows.findIndex((r) => r.kind === "head" && r.w.id === sel.w.id) : -1;
     if (si >= 0) {
-      if (tops[si] < this.scroll) this.scroll = tops[si];
+      // Leave room for the selected tab's workspace title when its group scrolls out of view.
+      const top = hi < 0 ? tops[si] : Math.max(tops[hi], tops[si] - H.head);
+      if (top < this.scroll) this.scroll = top;
       if (tops[si] + (H[sel.kind] ?? 32) > this.scroll + height) this.scroll = tops[si] + (H[sel.kind] ?? 32) - height;
     }
+    const sticky = hi >= 0 && tops[hi] < this.scroll;
     const place = (el, i) =>
       fixed
         ? el.absolute().left(0).right(0).top(tops[i] - this.scroll).bottom(height - (tops[i] + (H[rows[i].kind] ?? 32) - this.scroll))
         : el;
-    const visible = (i) => !fixed || (tops[i] + (H[rows[i].kind] ?? 32) > this.scroll && tops[i] < this.scroll + height);
+    const visible = (i) => (!sticky || i !== hi) && (!fixed || (tops[i] + (H[rows[i].kind] ?? 32) > this.scroll && tops[i] < this.scroll + height));
 
     const row = (r) => {
       if (r.kind === "head") {
@@ -262,7 +266,9 @@ export default class Picker extends View {
           if (k === "/") {
             this.searching = true;
             this.input.focus();
-          } else {
+          } else if (k === "h" || k === "k") this.move(-1, pickable.length);
+          else if (k === "j" || k === "l") this.move(1, pickable.length);
+          else {
             const state = stateFilters.find((s) => s[2] === k);
             if (!state) return;
             this.stateFilter = state[0]; this.at = 0; this.scroll = 0;
@@ -299,7 +305,10 @@ export default class Picker extends View {
               while (this.at > 0 && tops[rows.indexOf(pickable[this.at])] + (H[pickable[this.at].kind] ?? 32) > this.scroll + height) this.at--;
               cx.notify();
             }))
-          .children(rows.map((r, i) => (visible(i) ? place(row(r), i) : null)).filter(Boolean)),
+          .children(rows.map((r, i) => (visible(i) ? place(row(r), i) : null)).filter(Boolean))
+          .when(sticky, (el) => el.child(
+            row(rows[hi]).absolute().left(0).right(0).top(0).h(H.head).bg(t.popover),
+          )),
       );
   }
 }

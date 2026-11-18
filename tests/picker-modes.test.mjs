@@ -142,6 +142,45 @@ test("native Tab commands and arrows select entries in both modes", async () => 
   }
 });
 
+test("the selected workspace title stays visible after scrolling and returning to its first tab", () => {
+  const picker = open();
+  picker.listHeight = 90;
+  const titleCount = () => nodes(picker.render()).flatMap((node) => node.children).filter((child) => child === "workspace").length;
+  const list = nodes(picker.render()).find((node) => node.id === "pk-list");
+  list.events.on_scroll_wheel({delta: {y: -100}}, cx);
+  assert.equal(titleCount(), 1);
+  for (let i = 0; i < 3; i++) {
+    key(picker, "up");
+    assert.equal(titleCount(), 1);
+  }
+  key(picker, "enter");
+  assert.deepEqual(calls, [["tab.select", {id: "tab-blocked"}]]);
+});
+
+test("hjkl select adjacent entries only in filter mode", () => {
+  for (const [keys, expected] of [
+    [["j"], ["tab.select", {id: "tab-idle"}]],
+    [["l"], ["tab.select", {id: "tab-idle"}]],
+    [["j", "k"], ["tab.select", {id: "tab-blocked"}]],
+    [["l", "h"], ["tab.select", {id: "tab-blocked"}]],
+    [["h"], ["space.new", {}]],
+    [["k"], ["space.new", {}]],
+  ]) {
+    const picker = open();
+    for (const name of keys) key(picker, name);
+    key(picker, "enter");
+    assert.deepEqual(calls, [expected], JSON.stringify(keys));
+  }
+  for (const name of "hjkl") {
+    const picker = open();
+    key(picker, "/");
+    inputs[0].set_value("task");
+    key(picker, name);
+    inputs[0].events.submit();
+    assert.deepEqual(calls, [["tab.select", {id: "tab-blocked"}]], name);
+  }
+});
+
 test("navigation remains usable with no search matches and Ctrl+D still closes a selected tab", async () => {
   const picker = open();
   key(picker, "/");
