@@ -283,8 +283,19 @@ export default class Picker extends View {
             this.showPanes = !this.showPanes;
             this.at = this.rows().filter(r => r.kind === "ctx" || r.kind === "new" || r.kind === "space")
               .findIndex(r => r.kind === sel.kind && r.ctx?.id === sel.ctx?.id && r.machine === sel.machine && !r.pane);
-          } else if (k === "h" || k === "k") this.move(-1, pickable.length);
-          else if (k === "j" || k === "l") this.move(1, pickable.length);
+          } else if (k === "h" || k === "l") {
+            const starts = [];
+            for (let i = 0; i < pickable.length; i++) {
+              if (pickable[i].kind === "ctx" && pickable[i].w.id !== pickable[i - 1]?.w?.id) starts.push(i);
+            }
+            const current = starts.findIndex((i) => pickable[i].w.id === sel.w?.id);
+            if (starts.length && (starts.length > 1 || current < 0)) {
+              const next = current < 0 ? (k === "l" ? 0 : starts.length - 1)
+                : (current + (k === "l" ? 1 : -1) + starts.length) % starts.length;
+              this.at = starts[next];
+            }
+          } else if (k === "k") this.move(-1, pickable.length);
+          else if (k === "j") this.move(1, pickable.length);
           else {
             const state = stateFilters.find((s) => s[2] === k);
             if (!state) return;

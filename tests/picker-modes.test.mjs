@@ -2,7 +2,7 @@ import { registerHooks } from "node:module";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-let focused, closed, calls, inputs, receiveCommand, paneList;
+let focused, closed, calls, inputs, receiveCommand, paneList, workspaceList;
 function element(kind = "div", state) {
   const node = { kind, state, children: [], events: {}, id: null };
   const view = new Proxy(node, {
@@ -33,7 +33,7 @@ globalThis.pickerTest = {
   element, InputState,
   agents: () => agentList,
   panes: () => paneList,
-  spaces: () => [{ id: "space", name: "workspace", status: "blocked", active: true, tabs }],
+  spaces: () => workspaceList,
   run: (name, args) => calls.push([name, args]),
   closeOverlay: () => { closed++; },
   nextCommand: () => new Promise((resolve) => { receiveCommand = resolve; }),
@@ -58,6 +58,7 @@ const cx = {
 };
 function open(panes = []) {
   focused = null; closed = 0; calls = []; inputs = []; receiveCommand = null; paneList = panes;
+  workspaceList = [{ id: "space", name: "workspace", status: "blocked", active: true, tabs }];
   const picker = new Picker();
   picker.init({}, cx);
   return picker;
@@ -208,13 +209,10 @@ test("the selected workspace title stays visible after scrolling and returning t
   assert.deepEqual(calls, [["tab.select", {id: "tab-blocked"}]]);
 });
 
-test("hjkl select adjacent entries only in filter mode", () => {
+test("jk select adjacent entries while hjkl stay out of search navigation", () => {
   for (const [keys, expected] of [
     [["j"], ["tab.select", {id: "tab-idle"}]],
-    [["l"], ["tab.select", {id: "tab-idle"}]],
     [["j", "k"], ["tab.select", {id: "tab-blocked"}]],
-    [["l", "h"], ["tab.select", {id: "tab-blocked"}]],
-    [["h"], ["space.new", {}]],
     [["k"], ["space.new", {}]],
   ]) {
     const picker = open();
@@ -229,6 +227,48 @@ test("hjkl select adjacent entries only in filter mode", () => {
     key(picker, name);
     inputs[0].events.submit();
     assert.deepEqual(calls, [["tab.select", {id: "tab-blocked"}]], name);
+  }
+});
+
+test("hl jump to the first tab of adjacent listed workspaces, skipping nested panes and actions", () => {
+  for (const [keys, id] of [
+    [["l"], "tab-working"],
+    [["h"], "tab-done"],
+    [["j", "l"], "tab-working"],
+    [["l", "l"], "tab-done"],
+    [["l", "l", "l"], "tab-blocked"],
+    [["l", "h"], "tab-blocked"],
+    [["p", "j", "j", "l"], "tab-working"],
+    [["p", "j", "h"], "tab-done"],
+    [["up", "l"], "tab-blocked"],
+    [["up", "h"], "tab-done"],
+    [["i", "l"], "tab-idle"],
+  ]) {
+    const picker = open(splitPanes);
+    workspaceList = [
+      {id: "first", name: "First", status: "blocked", active: true, tabs: tabs.slice(0, 2)},
+      {id: "second", name: "Second", status: "working", tabs: tabs.slice(2, 3)},
+      {id: "third", name: "Third", status: "done", tabs: tabs.slice(3)},
+    ];
+    for (const name of keys) key(picker, name);
+    key(picker, "enter");
+    assert.deepEqual(calls, [["tab.select", {id}]], JSON.stringify(keys));
+  }
+});
+
+test("hl leave a lone workspace selection or an empty picker unchanged", () => {
+  for (const name of ["h", "l"]) {
+    const picker = open();
+    key(picker, "j");
+    key(picker, name);
+    key(picker, "enter");
+    assert.deepEqual(calls, [["tab.select", {id: "tab-idle"}]], name);
+
+    const empty = open();
+    workspaceList = [];
+    key(empty, name);
+    key(empty, "enter");
+    assert.deepEqual(calls, [["tab.new", undefined]], name);
   }
 });
 
